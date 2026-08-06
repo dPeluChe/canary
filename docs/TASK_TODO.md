@@ -6,14 +6,18 @@ Ordered so each step is provable before the next depends on it.
 
 - [x] `internal/discover` — tree walk, repo attribution, orphan lockfiles, tests
 - [x] Scaffold: module, CLI skeleton, exit-code contract, docs
+- [x] On-disk campaign format: **JSON, schema 1**, documented in
+      ARCHITECTURE/DATA_MODEL.md
+- [x] `campaign.Load` + tests — all-or-nothing loading, `ErrNoCampaigns`,
+      unknown keys rejected, unscoped `filename` artifacts refused
 
 ## Next — campaign loading
 
-- [ ] Define the on-disk campaign format (YAML or JSON — pick one, document it
-      in ARCHITECTURE/DATA_MODEL.md)
-- [ ] `campaign.Load` + tests
 - [ ] `scripts/fetch-campaign.sh` → converter from the Wiz CSV shape to that format
 - [ ] `canary campaign list` / `canary campaign show <id>`
+- [ ] Campaign dir resolution: `--campaigns`, `$CANARY_CAMPAIGN_DIR`, repo-local
+      `campaigns/`. `ErrNoCampaigns` and a missing dir must become a printed
+      Gap, never a silent zero-campaign scan
 
 ## Layer 1 — deps
 
@@ -104,6 +108,11 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 
 ## Open questions
 
-- Campaign format: YAML (readable, needs a dep) vs JSON (stdlib, noisier)?
+- ~~Campaign format: YAML vs JSON?~~ **Resolved: JSON.** Rationale in
+  ARCHITECTURE/DATA_MODEL.md.
 - Should campaigns be vendored in-repo at all, or always fetched? Upstream
   vendor lists have unclear licensing — the Wiz IoC repo publishes none.
+- Does a campaign need a window **end**? `Started` alone means the window runs
+  to now, which is the conservative reading and is what layers 2 and 4 will do
+  today. A closed window would tighten mtime evidence for an incident already
+  contained. Not added unilaterally — it is a DATA_MODEL change.

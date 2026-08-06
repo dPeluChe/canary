@@ -25,6 +25,75 @@ Artifact
   Note       why this indicator exists
 ```
 
+### On-disk format: JSON
+
+One campaign per `*.json` file, in a directory. `campaign.Load(dir)` reads that
+directory non-recursively.
+
+```json
+{
+  "schema": 1,
+  "id": "keyv-2026-08",
+  "name": "keyv / cacheable npm compromise",
+  "started": "2026-08-04T09:00:00Z",
+  "source": "https://www.wiz.io/blog/keyv-and-cacheable-npm-supply-chain-attack",
+  "note": "443 packages, maintainer account compromise",
+
+  "packages": [
+    { "ecosystem": "npm", "name": "keyv", "versions": ["6.0.0"] },
+    { "ecosystem": "npm", "name": "cacheable-request", "versions": ["13.0.20"] }
+  ],
+
+  "artifacts": [
+    { "kind": "domain", "value": "npm-cache.com", "note": "C2" },
+    {
+      "kind": "filename",
+      "value": "Math_Symbol.js",
+      "pathScope": "**/node_modules/keyv/**",
+      "note": "unscoped this hits regenerate-unicode-properties, a legitimate Unicode data file"
+    }
+  ]
+}
+```
+
+**Why JSON and not YAML.** Four reasons, in order of weight:
+
+1. `encoding/json` is stdlib. A YAML library is the single dependency that
+   would cost canary its "builds with zero network" property, and the planned
+   dependency table in CLAUDE.md deliberately does not list one.
+2. The canonical upstream feed (OpenSSF `malicious-packages`) is OSV format,
+   which is JSON. The converter's input and its output share a decoder.
+3. Campaign files are generated, not typed. The list that mattered during the
+   originating incident was 443 packages out of a CSV; YAML's authoring
+   ergonomics buy little at that size.
+4. canary's own dependency surface is part of its argument. A supply-chain
+   forensics tool carries fewer third-party parsers than it comfortably could.
+
+JSON's real cost is the lack of comments, which is why `note` is a schema field
+on the campaign and on every artifact. The *why* of an indicator travels as
+data, and survives into the report.
+
+### Field rules, and what each one prevents
+
+| Field | Rule | Failure it prevents |
+|---|---|---|
+| `schema` | must equal `1` | a future format decoding as a half-empty campaign |
+| `id`, `name` | required | unattributable findings |
+| `started` | required, RFC3339 | layers 2 and 4 have no window without it |
+| `packages` / `artifacts` | at least one non-empty | a campaign that can never match |
+| `versions` | **omitted or empty means every version matches** | a wholly malicious package (typosquat, hijacked publish) has no safe version |
+| `pathScope` | **required when `kind` is `filename`** | the `Math_Symbol.js` false positive, below |
+| unknown keys | rejected | `"package"` for `"packages"` decoding to zero packages and reporting clean |
+
+Loading is all-or-nothing. One malformed file fails the whole call rather than
+returning the others, and an empty directory returns `ErrNoCampaigns` instead
+of an empty slice. Four campaigns loaded out of five, or zero loaded silently,
+both read downstream as full coverage — see invariant 5.
+
+`pathScope` globs use `**` and are matched against paths relative to the scan
+root. Note that stdlib `filepath.Match` does **not** implement `**`; the ioc
+layer needs a matcher that does. Load only smoke-tests the pattern's syntax.
+
 ### Why campaigns are files
 
 When an attack breaks, the vendor IoC list (Wiz, Socket, Aikido, StepSecurity)

@@ -37,7 +37,7 @@ Five packages under `internal/`, one per layer, plus a viewer:
 | Package | Layer | Responsibility | State |
 |---|---|---|---|
 | `discover/` | — | walk a tree → repos + lockfiles | DONE, tested |
-| `campaign/` | — | load IoC lists as data | stub |
+| `campaign/` | — | load IoC lists as data (JSON) | DONE, tested |
 | `deps/` | 1 | lockfiles → malicious versions | stub |
 | `ioc/` | 2 | filesystem artifacts + persistence | stub |
 | `ci/` | 4 | GitHub Actions × attack window | stub |
