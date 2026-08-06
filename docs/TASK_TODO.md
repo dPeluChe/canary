@@ -51,10 +51,46 @@ Ordered so each step is provable before the next depends on it.
 - [ ] JSON renderer
 - [ ] SARIF renderer
 - [ ] Exit codes wired
+- [ ] **Persist the resolved inventory** to `.canary/inventory.json`, not just
+      the verdict. Re-resolving 485 lockfiles to test one new campaign is
+      wasted work — and `watch` mode below depends on this artifact existing
 
 ## Layer 3 — delegation
 
 - [ ] Shell out to `zizmor` when present; record a `Gap` when absent
+
+## watch mode
+
+Decided in scope. `canary watch` polls the **threat feeds**, not the
+filesystem — the asymmetry that makes it cheap is that your tree changes slowly
+while the campaign list changes daily. A tree that scanned clean today is not
+clean tomorrow, because tomorrow's attack was not published yet.
+
+```
+canary watch --interval 6h
+  1. poll OSV MAL- / OpenSSF malicious-packages / vendor lists
+  2. new campaign? → match against the ALREADY-RESOLVED inventory
+  3. hit → alert.  no hit → stay silent
+```
+
+Step 2 is milliseconds because it reads `.canary/inventory.json` instead of
+re-walking. That artifact is the prerequisite — see the verdict section.
+
+- [ ] Feed pollers with etag/since handling
+- [ ] Match new campaigns against the cached inventory
+- [ ] Alert sink (stdout / exit code first; anything else later)
+- [ ] Staleness guard: refuse to stay silent on an inventory older than N days,
+      since a silent watch over a stale inventory is worse than no watch
+
+**Explicitly out of scope**, both are different products:
+
+- *Install-time interception* (wrapping `npm install` to vet before execution).
+  Socket's `safe npm` does this; it would couple canary to every package
+  manager.
+- *Live persistence monitoring* (a daemon watching `~/.claude/hooks/` and
+  `tasks.json` for writes). That is an EDR, with a completely different risk
+  profile — something resident with access to `$HOME` is not the same kind of
+  thing as a binary that runs and exits.
 
 ## Later
 
@@ -71,5 +107,3 @@ Ordered so each step is provable before the next depends on it.
 - Campaign format: YAML (readable, needs a dep) vs JSON (stdlib, noisier)?
 - Should campaigns be vendored in-repo at all, or always fetched? Upstream
   vendor lists have unclear licensing — the Wiz IoC repo publishes none.
-- Is there a useful `canary watch` mode, or does that belong to a different
-  tool entirely? (Leaning: different tool. Keep the scope boundary.)
