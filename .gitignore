@@ -1,0 +1,10 @@
+/canary
+/dist/
+*.test
+*.out
+
+# Fetched IoC lists: upstream licensing is unstated, never commit them.
+/campaigns/*/
+!/campaigns/README.md
+
+.DS_Store
