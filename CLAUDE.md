@@ -34,15 +34,15 @@ If you disagree with a decision, argue with the doc. Do not silently reverse it.
 
 Five packages under `internal/`, one per layer, plus a viewer:
 
-```
-discover/   walk a tree → repos + lockfiles        [DONE, tested]
-campaign/   load IoC lists as data                 [stub]
-deps/       layer 1 — lockfiles → malicious versions  [stub]
-ioc/        layer 2 — artifacts + persistence      [stub]
-ci/         layer 4 — GitHub Actions × window      [stub]
-verdict/    merge → per-repo answer → text/json/sarif  [stub]
-tui/        optional viewer over a finished report [stub]
-```
+| Package | Layer | Responsibility | State |
+|---|---|---|---|
+| `discover/` | — | walk a tree → repos + lockfiles | DONE, tested |
+| `campaign/` | — | load IoC lists as data | stub |
+| `deps/` | 1 | lockfiles → malicious versions | stub |
+| `ioc/` | 2 | filesystem artifacts + persistence | stub |
+| `ci/` | 4 | GitHub Actions × attack window | stub |
+| `verdict/` | — | merge → per-repo answer → text/json/sarif | stub |
+| `tui/` | — | optional viewer over a finished report | stub |
 
 Layer 3 (static analysis of workflow files) is **delegated to `zizmor`**, not
 reimplemented. It has 23 mature rules; competing with it is wasted effort.
@@ -126,3 +126,21 @@ canary is deliberately **isolated**. It is not part of any other tooling in the
 author's workspace and must not grow dependencies on it. Repo-watching,
 status-and-PR dashboards, and release flows belong to other projects. If a
 request would couple canary to one of them, say so instead of building it.
+
+@~/.agents/skills/FLOW_CLAUDE.md
+
+## ship config
+
+```yaml
+lint:            gofmt -l . | (! grep .) && go vet ./...
+typecheck:       go build ./...
+build:           go build ./...
+test:            go test ./...
+merge_policy: ask   # auto | ask
+loc_limit: 500
+simplify: 500       # run /simplify only if changed LOC > N (off = only on request)
+```
+
+`gofmt -l` exits 0 even when it lists unformatted files, so piping it through
+`(! grep .)` is what turns the list into a failure. Verified in both
+directions — a planted misformat and a planted `vet` error each fail the gate.
