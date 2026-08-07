@@ -239,20 +239,77 @@ func (p Package) VersionLabel() string {
 	return strings.Join(p.Versions, ", ")
 }
 
+// NormalizeVersion makes two spellings of the same version comparable.
+//
+// A vendor list writes "v6.0.0" where a lockfile stores "6.0.0", and semver
+// says build metadata is NOT part of precedence — so "6.0.0" and "6.0.0+build"
+// are the same version. Comparing them raw produced a clean verdict with the
+// attack loaded, which is the worst output this tool can give.
+//
+// Deliberately conservative: it does not parse or range-match. Anything beyond
+// these two spellings is left alone rather than guessed at.
+func NormalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) > 1 && (v[0] == 'v' || v[0] == 'V') && v[1] >= '0' && v[1] <= '9' {
+		v = v[1:]
+	}
+	if i := strings.IndexByte(v, '+'); i > 0 {
+		v = v[:i]
+	}
+	return v
+}
+
+// NormalizeName folds a package name the way its own registry does, so a
+// vendor's spelling and a lockfile's spelling of the same package compare
+// equal.
+//
+// Only ecosystems whose registry publishes a folding rule are folded: npm
+// lowercases, and PyPI normalizes per PEP 503 (lowercase, and runs of - _ .
+// collapse to a single -). Everything else is compared verbatim, because Go
+// module paths and others are genuinely case-sensitive and folding them would
+// invent matches.
+func NormalizeName(ecosystem, name string) string {
+	switch strings.ToLower(ecosystem) {
+	case "npm":
+		return strings.ToLower(strings.TrimSpace(name))
+	case "pypi":
+		var b strings.Builder
+		prevSep := false
+		for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+			if r == '-' || r == '_' || r == '.' {
+				if !prevSep {
+					b.WriteByte('-')
+					prevSep = true
+				}
+				continue
+			}
+			prevSep = false
+			b.WriteRune(r)
+		}
+		return b.String()
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
 // Matches reports whether ecosystem/name@version is covered by p.
 //
 // An empty Versions list means EVERY version matches: a wholly malicious
 // package has no safe version, and layer 1's self-validation mode needs the
 // same shape.
 func (p Package) Matches(ecosystem, name, version string) bool {
-	if !strings.EqualFold(p.Ecosystem, ecosystem) || p.Name != name {
+	if !strings.EqualFold(p.Ecosystem, ecosystem) {
+		return false
+	}
+	if NormalizeName(p.Ecosystem, p.Name) != NormalizeName(ecosystem, name) {
 		return false
 	}
 	if len(p.Versions) == 0 {
 		return true
 	}
+	want := NormalizeVersion(version)
 	for _, v := range p.Versions {
-		if v == version {
+		if NormalizeVersion(v) == want {
 			return true
 		}
 	}

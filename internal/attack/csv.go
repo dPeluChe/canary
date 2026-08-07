@@ -71,6 +71,9 @@ func FromCSV(r io.Reader, ecosystem string, meta Attack) (Attack, error) {
 			continue
 		}
 
+		if isRange(rec[versCol]) {
+			return meta, fmt.Errorf("attack: csv: line %d: %q lists a version RANGE (%q); the format holds exact versions, and splitting a range on its comma produces entries that match nothing. Resolve it to concrete versions first", line, name, strings.TrimSpace(rec[versCol]))
+		}
 		versions := splitVersions(rec[versCol])
 		if len(versions) == 0 {
 			return meta, fmt.Errorf("attack: csv: line %d: %q has no versions; an empty list would match EVERY version, so state it deliberately in the file instead", line, name)
@@ -106,6 +109,15 @@ func findColumn(header, accepted []string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("attack: csv: no column named any of %v (found %v)", accepted, header)
+}
+
+// isRange spots a semver range in a cell. Ranges are refused rather than
+// parsed: resolving them is OSV's job, and the silent alternative — splitting
+// ">=1.0.0, <2.0.0" on its comma — yields two entries that match nothing while
+// the attack file looks fully loaded.
+func isRange(cell string) bool {
+	return strings.ContainsAny(cell, "<>^~") || strings.Contains(cell, "||") ||
+		strings.Contains(cell, " - ") || strings.Contains(cell, "*")
 }
 
 func splitVersions(cell string) []string {

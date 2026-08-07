@@ -166,8 +166,10 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 - [x] **Invariant 3 verified per format**: all five kinds resolve 301 packages
       against 8 declared, each finding a transitive `keyv@6.0.0` absent from the
       manifest. All five go red when extraction is replaced with spark's model
-- [ ] Audit `attack`, `corpus` and `datadir` for load-time drops — a version
-      range or artifact silently lost there is the same false negative class
+- [x] Audited `attack`, `corpus` and `datadir` for load-time drops. Four found
+      and fixed: leading `v`, semver build metadata, registry name folding
+      (npm/PyPI only), and version ranges — now refused instead of split into
+      entries that match nothing
 - [ ] Prove invariant 1 rather than asserting it: trace syscalls on a real scan
 
 ## Later
