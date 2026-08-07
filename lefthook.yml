@@ -1,0 +1,9 @@
+# Managed by dPeluChe/skills scripts/install.sh --repo.
+# Central hooks live in that repo (hooks/lefthook-base.yml); lefthook
+# refetches them at most once a day.
+remotes:
+  - git_url: https://github.com/dPeluChe/skills
+    ref: main
+    refetch_frequency: 24h
+    configs:
+      - hooks/lefthook-base.yml
