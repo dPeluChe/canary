@@ -32,16 +32,18 @@ If you disagree with a decision, argue with the doc. Do not silently reverse it.
 
 ## Architecture
 
-Five packages under `internal/`, one per layer, plus a viewer:
+Seven packages under `internal/`, one per layer plus shared data sources:
 
 | Package | Layer | Responsibility | State |
 |---|---|---|---|
 | `discover/` | — | walk a tree → repos + lockfiles | DONE, tested |
 | `attack/` | — | load IoC lists as data (JSON) | DONE, tested |
+| `corpus/` | 1 | offline malicious-package lookup from cumulative datasets (DataDog, pypi_malregistry). NOT attack files — no forensic window. Loaded via `canary attacks -corpus` | DONE, tested |
 | `deps/` | 1 | lockfiles → malicious versions | extraction DONE, matching stub |
 | `ioc/` | 2 | filesystem artifacts + persistence | stub |
 | `ci/` | 4 | GitHub Actions × attack window | stub |
 | `verdict/` | — | merge → per-repo answer → text/json/sarif | stub |
+| `datadir/` | — | where a data set is read from, shared by every source so a flag cannot mean two things | DONE, tested |
 | `tui/` | — | optional viewer over a finished report | stub |
 
 Layer 3 (static analysis of workflow files) is **delegated to `zizmor`**, not

@@ -12,13 +12,17 @@ and did anything persist? `canary` answers that in one pass.
 
 ```
 canary discover ~/code            # inventory: repos + lockfiles
-canary attacks list               # known attacks canary can match against
-canary attacks show keyv-2026-08  # one attack in full
-canary attacks import -csv keyv.csv -id keyv-2026-08 \
+canary attacks                    # what canary can match against, and how old it is
+canary attacks keyv-2026-08       # one attack in full
+canary import -csv keyv.csv -id keyv-2026-08 \
   -name 'keyv npm compromise' -started 2026-08-04T09:00:00Z \
   > attacks/keyv-2026-08.json     # vendor CSV → attack file, on stdout
 canary scan ~/code --since 2026-08-04T09:00:00Z
 ```
+
+**No command is longer than two words.** `canary attacks` already means "show
+me the attacks", so there is no `list` or `show` to type. Anything past the
+second word is a flag.
 
 An *attack* is the attacker's, not yours: one registry compromise expressed as
 a data file — its window, the package versions it poisoned, and the traces it

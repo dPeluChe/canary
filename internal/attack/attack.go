@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/dPeluChe/canary/internal/datadir"
 )
 
 // Schema is the only on-disk schema version canary accepts. Bump it when the
@@ -95,40 +97,20 @@ type Artifact struct {
 
 // Sources an attack directory can come from, in precedence order.
 const (
-	SourceFlag    = "flag"
-	SourceEnv     = "$CANARY_ATTACK_DIR"
-	SourceRepo    = "repo-local attacks/"
-	SourceDefault = "default"
+	SourceFlag    = datadir.SourceFlag
+	SourceEnv     = "$" + EnvDir
+	SourceRepo    = datadir.SourceRepo + " attacks/"
+	SourceDefault = datadir.SourceDefault
 )
 
 // EnvDir is the environment variable scripts/fetch-attack.sh writes into.
 const EnvDir = "CANARY_ATTACK_DIR"
 
 // ResolveDir picks which directory to load attacks from, and reports which
-// source chose it so output can name it.
-//
-// An explicit flag or env value is returned WITHOUT checking that it exists.
-// Falling through to another directory because the requested one is missing
-// would silently scan against the wrong list — the caller must see the
-// resulting fs.ErrNotExist instead.
+// source chose it so output can name it. See datadir.Resolve for the
+// precedence and for why a missing explicit directory is not fallen through.
 func ResolveDir(explicit, workdir string) (dir, source string, err error) {
-	if explicit != "" {
-		return explicit, SourceFlag, nil
-	}
-	if v := os.Getenv(EnvDir); v != "" {
-		return v, SourceEnv, nil
-	}
-	if workdir != "" {
-		local := filepath.Join(workdir, "attacks")
-		if fi, statErr := os.Stat(local); statErr == nil && fi.IsDir() {
-			return local, SourceRepo, nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", fmt.Errorf("attack: no directory given and home is unreadable: %w", err)
-	}
-	return filepath.Join(home, ".canary", "attacks"), SourceDefault, nil
+	return datadir.Resolve(explicit, workdir, EnvDir, "attacks")
 }
 
 // Load reads every *.json attack file in dir, non-recursively. Subdirectories are

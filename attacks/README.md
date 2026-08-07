@@ -63,6 +63,15 @@ straight into this directory without their JSON being mistaken for attacks.
 
 ## Upstream sources
 
+Incident-shaped (one file per compromise, with a window):
+
 - [OpenSSF malicious-packages](https://github.com/ossf/malicious-packages) — OSV format, cross-ecosystem, the canonical feed
 - [Wiz Research IoCs](https://github.com/wiz-sec-public/wiz-research-iocs) — fast during incidents, no license
 - Socket, Aikido, StepSecurity — vendor advisories, usually blog-first
+
+Corpus-shaped (cumulative, no single window — loaded as a layer-1 lookup, not
+attack files; see `internal/corpus` and TOOLING_LANDSCAPE.md):
+
+- [DataDog/malicious-software-packages-dataset](https://github.com/DataDog/malicious-software-packages-dataset) — Apache-2.0, 47k npm + 1.8k PyPI (Aug 2026), `manifest.json` per ecosystem
+- [lxyeternal/pypi_malregistry](https://github.com/lxyeternal/pypi_malregistry) — 9,503 PyPI pkgs, **no license** — fetch locally, never commit
+- [Backstabbers-Knife-Collection](https://github.com/dasfreak/Backstabbers-Knife-Collection) — 174 historical ground-truth pkgs (research-use license)
