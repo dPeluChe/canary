@@ -42,7 +42,8 @@ Seven packages under `internal/`, one per layer plus shared data sources:
 | `deps/` | 1 | lockfiles → malicious versions | extraction DONE, matching stub |
 | `ioc/` | 2 | filesystem artifacts + persistence, two families | DONE, tested |
 | `ci/` | 4 | GitHub Actions × attack window, opt-in with `-ci` | DONE, tested |
-| `verdict/` | — | merge → per-repo answer → text/json/sarif | stub |
+| `zizmor/` | 3 | delegation to the zizmor binary; gap when absent | DONE, tested |
+| `verdict/` | — | merge → per-repo answer → text/json | text+json DONE, sarif pending |
 | `datadir/` | — | where a data set is read from, shared by every source so a flag cannot mean two things | DONE, tested |
 | `tui/` | — | optional viewer over a finished report | stub |
 

@@ -118,7 +118,10 @@ failure modes. `zizmor` stays the one exception, because it contributes
 
 ## Layer 3 — delegation
 
-- [ ] Shell out to `zizmor` when present; record a `Gap` when absent
+- [x] Shell out to `zizmor` when present; record a `Gap` when absent. Parsed
+      against the real 1.29.0 JSON schema, never a guessed one. Findings are
+      Suspected at most — zizmor answers "could this be abused", not "were you
+      attacked", and must never escalate a repo the forensic layers found clean
 
 ## watch mode
 

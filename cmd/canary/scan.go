@@ -16,6 +16,7 @@ import (
 	"github.com/dPeluChe/canary/internal/discover"
 	"github.com/dPeluChe/canary/internal/ioc"
 	"github.com/dPeluChe/canary/internal/verdict"
+	"github.com/dPeluChe/canary/internal/zizmor"
 )
 
 // cmdScan is the whole product in one command: inventory a tree, resolve every
@@ -130,7 +131,14 @@ func cmdScan(args []string) int {
 		rep.AddGap("persistence: %d known location(s) inspected, %d untouched since the window start",
 			sweep.PersistenceChecked, sweep.PersistenceUntouched)
 	}
-	rep.AddGap("layer 3 (workflow static analysis, delegated to zizmor) is not implemented")
+	zizmorOK := true
+	if v, zErr := zizmor.Available(context.Background()); zErr != nil {
+		zizmorOK = false
+		rep.AddGap("layer 3: zizmor is not installed, so workflow files were NOT audited " +
+			"(brew install zizmor) — an unasked question, not a clean answer")
+	} else {
+		rep.AddGap("layer 3 ran %s: it answers whether a workflow COULD be abused, not whether it was", v)
+	}
 	var ciClient *ci.Client
 	if *ciOn {
 		ciClient, err = ci.New("")
@@ -167,16 +175,17 @@ func cmdScan(args []string) int {
 			checked++
 		}
 
-		if checked == 0 && len(v.Artifacts) == 0 {
-			v.Status = verdict.Skipped
+		// Layer 1 having nothing to read does NOT end the repo: layers 3 and 4
+		// still apply, and a repo with no lockfiles can still ship a
+		// dangerous workflow. Skipping here was silently dropping them.
+		depsSkipped := checked == 0
+		if depsSkipped {
 			switch {
 			case len(repo.Lockfiles) == 0:
 				v.Reason = "no lockfiles"
 			default:
 				v.Reason = fmt.Sprintf("%d lockfile(s), none readable by this build", skipped)
 			}
-			rep.Repos = append(rep.Repos, v)
-			continue
 		}
 
 		for _, f := range deps.Match(all, attacks, c) {
@@ -190,6 +199,8 @@ func cmdScan(args []string) int {
 		familySeen += len(visible)
 
 		switch {
+		case depsSkipped:
+			v.Status = verdict.Skipped
 		case len(v.MaliciousDeps) > 0 || hasIndicator(sweep, repo.Path):
 			v.Status = verdict.Confirmed
 			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s)", len(all), checked)
@@ -205,6 +216,23 @@ func cmdScan(args []string) int {
 				v.Reason += fmt.Sprintf("; %d package(s) of an affected family present at safe versions", len(visible))
 			}
 		}
+		if zizmorOK {
+			// zizmor answers "could this workflow be abused", not "were you
+			// attacked". That is Suspected at most: it never escalates a repo
+			// the forensic layers found clean.
+			if hits, zErr := zizmor.Run(context.Background(), repo.Path); zErr != nil {
+				rep.AddGap("layer 3 could not audit %s: %v", repo.Name, zErr)
+			} else if len(hits) > 0 {
+				for _, h := range hits {
+					v.Artifacts = append(v.Artifacts, "workflow: "+h.Describe())
+				}
+				if v.Status == verdict.Clean || v.Status == verdict.Skipped {
+					v.Status = verdict.Suspected
+					v.Reason = fmt.Sprintf("%s; %d workflow weakness(es) reported by zizmor", v.Reason, len(hits))
+				}
+			}
+		}
+
 		if ciClient != nil && repo.Slug != "" {
 			checkCI(ciClient, rep, &v, repo.Slug, window, len(v.MaliciousDeps) > 0)
 		}
