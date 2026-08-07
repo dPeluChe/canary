@@ -127,9 +127,12 @@ author's workspace and must not grow dependencies on it. Repo-watching,
 status-and-PR dashboards, and release flows belong to other projects. If a
 request would couple canary to one of them, say so instead of building it.
 
-@~/.agents/skills/FLOW_CLAUDE.md
-
 ## ship config
+
+Git hooks come from the central config `lefthook.yml` points at; the block
+below is what pre-push and `/ship` run. A machine-local `CLAUDE.local.md` may
+add personal agent rules — it is never committed, and nothing here depends on
+it existing.
 
 ```yaml
 lint:            gofmt -l . | (! grep .) && go vet ./...
