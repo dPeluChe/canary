@@ -78,7 +78,7 @@ func FromCSV(r io.Reader, ecosystem string, meta Attack) (Attack, error) {
 
 		// Vendors repeat a package across rows when versions land in batches.
 		if at, seen := byName[name]; seen {
-			meta.Packages[at].Versions = dedupe(append(meta.Packages[at].Versions, versions...))
+			meta.Packages[at].Versions = NormalizeVersions(append(meta.Packages[at].Versions, versions...))
 			continue
 		}
 		byName[name] = len(meta.Packages)
@@ -115,14 +115,17 @@ func splitVersions(cell string) []string {
 			out = append(out, v)
 		}
 	}
-	return dedupe(out)
+	return NormalizeVersions(out)
 }
 
-func dedupe(in []string) []string {
+// NormalizeVersions trims, drops blanks, dedupes and sorts a version list.
+// Exported because every source adapter needs the same normalization, and two
+// sources that normalize differently would disagree about the same package.
+func NormalizeVersions(in []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, v := range in {
-		if !seen[v] {
+		if v = strings.TrimSpace(v); v != "" && !seen[v] {
 			seen[v] = true
 			out = append(out, v)
 		}

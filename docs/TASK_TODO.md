@@ -50,6 +50,19 @@ an unreachable source is a gap, never a silence.
 - [ ] Source adapter: **OpenSSF malicious-packages** (Apache, clonable, OSV format)
 - [ ] Source adapter: **Cobenian/shai-hulud-detect** (MIT, 5,752 `name:version`,
       actively maintained — correct TOOLING_LANDSCAPE, which implies otherwise)
+- [ ] Corpus source: **DataDog/malicious-software-packages-dataset**
+      (Apache-2.0, 47k npm + 1.8k PyPI as of Aug 2026, `manifest.json` per
+      ecosystem). Cumulative, not
+      an incident — loads as an offline `IsMalicious` lookup for layer 1, NOT a
+      converted attack file (no single forensic window). See `internal/corpus`.
+- [ ] Corpus source: **lxyeternal/pypi_malregistry** (9,503 PyPI pkgs).
+      Same corpus shape as DataDog. **No LICENSE upstream** — fetch and use
+      locally, never vendor or redistribute, same rule as the Wiz CSV
+- [ ] Self-validation fixture: **Backstabbers-Knife-Collection** (174 historical
+      ground-truth pkgs). A scanner that misses these is wrong — use as a test
+      fixture, not a live source.
+- [ ] Watch poller: **Safeguard threat feed** (JSON / STIX 2.1, 90-day window,
+      <5 min lag). Candidate for `canary watch`, not a one-shot fetch.
 - [ ] Staleness surfaced in `canary attacks`: age per source, loud when old
 - [ ] Vendor CSVs stay manual via `canary import` — no licence to redistribute
 

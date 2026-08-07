@@ -150,6 +150,109 @@ runs alone produces alarm without information.
 
 ---
 
+## Additional consumable lists
+
+Re-checked August 2026. These are consumable *data* sources (lists/feeds),
+not tools to invoke — the same distinction as shai-hulud-detect's
+`compromised-packages.txt`. Each is a candidate source adapter; none is a
+scanner canary would shell out to.
+
+### [DataDog/malicious-software-packages-dataset](https://github.com/DataDog/malicious-software-packages-dataset) — ~371 ★, Apache-2.0
+
+The largest redistributable corpus found. Counted directly from the manifests
+on 7 Aug 2026: **47,306 npm and 1,833 PyPI packages**, plus IDE extensions and
+AI Skills. Human-vetted, mostly surfaced by
+[GuardDog](https://github.com/DataDog/guarddog). Verify the count rather than
+quoting it — it grows, and an out-of-date figure in a doc reads as precision it
+does not have.
+Ecosystems: npm, PyPI, IDE extensions, AI Skills. Each ecosystem subdir ships a
+`manifest.json` — a `map[name][]versions` where `null` means "every version is
+malicious", which is 99% of PyPI entries (1,816 of 1,833): a typosquat has no
+safe version. Apache-2.0 means it can be redistributed and derived from, unlike
+the vendor CSVs.
+
+Note the subdirectory names are inconsistent upstream — `ai-skills` with a
+hyphen, `ide_extensions` with an underscore. `internal/corpus` accepts both,
+and has a test pinning the real names: an unmapped subdir is deliberately
+fatal, so guessing one spelling fails the entire load.
+
+**It is a cumulative corpus, not an incident.** Forcing it into the on-disk
+`Attack` format would break the one-incident-one-window model: layers 2 and 4
+key off `Started`, and a years-spanning corpus has no single forensic window.
+It belongs as a **corpus source** for layer 1 (an offline `IsMalicious`
+lookup alongside the OSV.dev online path), not as a converted attack file.
+See `internal/corpus`.
+
+### [lxyeternal/pypi_malregistry](https://github.com/lxyeternal/pypi_malregistry) — ~129 ★, **NO LICENSE**
+
+**10,823 versions of 9,503 malicious PyPI packages**, from the ASE 2023 paper
+"An Empirical Study of Malicious Code In PyPI Ecosystem" (Guo et al., extended
+in USENIX Security 26). Heavy on typosquats. PyPI-only. Same
+corpus-not-incident caveat as DataDog.
+
+**Licensing checked 7 Aug 2026: there is no LICENSE file and the README does
+not state a licence.** An earlier draft of this section called it CC0; that was
+wrong. Default copyright applies, exactly as with the Wiz IoC repository — see
+`attacks/README.md`. It may be fetched and used locally, never vendored into
+this repo or redistributed.
+
+### [Backstabbers-Knife-Collection](https://github.com/dasfreak/Backstabbers-Knife-Collection) — academic, npm/PyPI/RubyGems
+
+174 malicious packages from real-world attacks, Nov 2015 – Nov 2019, manually
+collected and analyzed (Ohm et al., DIMVA 2020). Small and historical, but the
+ground-truth baseline every detection paper since has measured against. Useful
+as a **self-validation fixture**: a scanner that misses these is wrong, full
+stop. License is research-use; verify before redistributing.
+
+### [Safeguard threat feed](https://safeguard.sh/threat-feed) — free, multi-format
+
+A public feed of high-severity supply-chain CVEs, malicious-package alerts
+(npm, PyPI, Maven, NuGet, crates.io), and exploit-availability changes. Ships
+as RSS, JSON, and **STIX 2.1** indicator bundles — the STIX form is the one a
+SIEM/TIP would ingest. 90-day rolling window, <5 min lag from upstream. A
+candidate for the `watch` mode poller (TASK_TODO), not a one-shot fetch.
+
+### GitHub Advisory Database — malware, 8 ecosystems
+
+Not a separate feed: GitHub ingests OpenSSF malicious-packages into its
+Advisory Database and now flags malware across **npm, PyPI, Maven, RubyGems,
+NuGet, Go, crates.io, PHP Composer** ([GitHub Blog](https://github.blog/security/supply-chain-security/how-we-took-malware-advisories-beyond-npm/)).
+Worth noting because it widens the OSV `MAL-` surface beyond npm for any tool
+that already queries OSV.dev — canary's planned OSV adapter inherits this for
+free. [PyRank](https://pyrank.org/advisories/) is a daily-refreshed catalogue
+over the same OSV data (~10k PyPI advisories), useful as a browsing UI.
+
+### Incident-specific forks worth tracking
+
+The shai-hulud-detect family keeps forking per incident. Apply the rule from
+"Incident-response scanners: check the numbers first" above before trusting any
+of them — it exists precisely for this category.
+
+- [otaviomarcal/npm-supply-chain-detector](https://github.com/otaviomarcal/npm-supply-chain-detector)
+  — fork tracking Sept 2025 → Aug 2026 campaigns (chalk/debug, axios takeover,
+  keyv/cacheable, SANDWORM_MODE), 5,100+ malicious versions, MIT.
+  **0 ★ as of 7 Aug 2026.** By this document's own standard that is not a
+  source to depend on: an unreviewed fork is one maintainer's judgement with
+  nobody checking it. Listed for awareness, deliberately NOT wired as an
+  adapter. If its extra versions matter, the correct move is to get them
+  upstreamed into shai-hulud-detect, which is reviewed by PR.
+- [Securest8/npm-incident-response](https://github.com/Securest8/npm-incident-response)
+  — keyv/cacheable-specific, but documents the **persistence vectors**
+  (`.claude/settings.json` `SessionStart`, `.vscode/tasks.json` `folderOpen`)
+  that layer 2 must sweep. Read for the IoC shape, do not model the tool.
+
+### What is NOT a list
+
+[homeofe/supply-chain-guard](https://github.com/homeofe/supply-chain-guard)
+and [safedep/vet](https://github.com/safedep/vet) are scanners (350+ and
+policy-CEL rules respectively), not consumable data. They belong in the
+"others worth knowing" tier of layer 1, not in the source-adapter list.
+Consuming a data source is cheap and uncoupled; invoking a scanner couples
+canary to its CLI and failure modes. `zizmor` stays the one exception because
+it contributes *analysis*, not data.
+
+---
+
 ## Vendor advisories as a data source
 
 Vendors publish per-incident advisories, not consumable feeds:

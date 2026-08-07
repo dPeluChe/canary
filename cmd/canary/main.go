@@ -10,9 +10,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
+	"github.com/dPeluChe/canary/internal/corpus"
 	"github.com/dPeluChe/canary/internal/discover"
 )
 
@@ -38,6 +41,8 @@ func main() {
 		os.Exit(cmdAttacks(os.Args[2:]))
 	case "import":
 		os.Exit(cmdImport(os.Args[2:]))
+	case "corpus":
+		os.Exit(cmdCorpus(os.Args[2:]))
 	case "scan":
 		os.Exit(cmdScan(os.Args[2:]))
 	case "version", "--version", "-v":
@@ -64,6 +69,8 @@ COMMANDS
   attacks            Known attacks canary can match against
   attacks <id>       One attack in full
   import -csv <f>    Convert a vendor CSV to an attack file, on stdout
+  corpus <dir>       Load a cumulative malicious-package dataset (DataDog/pypi-mal)
+  corpus <dir> <pkg> Look up one package in a loaded corpus
   scan <path>        Run the full sweep and emit a verdict per repo
   version            Print the version
 
@@ -253,6 +260,73 @@ func cmdImport(args []string) int {
 
 	fmt.Fprintf(os.Stderr, "canary: %d package(s) from %s — artifacts must be added by hand, the CSV carries none\n",
 		len(built.Packages), *csvPath)
+	return exitClean
+}
+
+// cmdCorpus loads a cumulative malicious-package dataset (DataDog or
+// pypi_malregistry shape) and either lists its coverage or looks up one
+// package. A corpus is NOT a set of attack files: it has no forensic window,
+// so it feeds layer 1's matching directly rather than going through Attack.
+func cmdCorpus(args []string) int {
+	fs := flag.NewFlagSet("corpus", flag.ExitOnError)
+	eco := fs.String("ecosystem", "", "filter lookup to one ecosystem (npm, PyPI, ...)")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "canary corpus: <dir> required (a cloned DataDog dataset or pypi_malregistry)")
+		return exitError
+	}
+
+	c, err := corpus.LoadDataDog(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		return exitError
+	}
+
+	// A second positional arg is a package name to look up. Exit codes follow
+	// the contract: a hit is a FINDING (1), a miss is clean (0). Getting this
+	// backwards makes `canary corpus <dir> <pkg> && echo ok` print ok exactly
+	// when the package is malicious.
+	if fs.NArg() >= 2 {
+		name := fs.Arg(1)
+		lookups := c.Ecosystems()
+		if *eco != "" {
+			if !slices.Contains(lookups, *eco) {
+				fmt.Fprintf(os.Stderr, "canary: -ecosystem %q is not in this corpus (have: %s)\n",
+					*eco, strings.Join(lookups, ", "))
+				return exitError
+			}
+			lookups = []string{*eco}
+		}
+
+		hit := false
+		for _, e := range lookups {
+			entry, ok := c.Lookup(e, name)
+			if !ok {
+				continue
+			}
+			hit = true
+			vers := entry.VersionLabel()
+			fmt.Printf("%-10s %-40s %s\n", e, name, vers)
+			fmt.Printf("%-10s %-40s via %s\n", "", "", strings.Join(entry.Sources, ", "))
+		}
+		if !hit {
+			// Not a clean bill of health, and the wording must not imply one.
+			fmt.Printf("%s: not in this corpus (%d entries across %s)\n",
+				name, c.Count(""), strings.Join(c.Ecosystems(), ", "))
+			fmt.Println("absence from a list is not evidence of safety, only absence from that list")
+			return exitClean
+		}
+		return exitFindings
+	}
+
+	fmt.Printf("%d entries from %s — sources: %s\n\n",
+		c.Count(""), fs.Arg(0), strings.Join(c.Sources(), ", "))
+	fmt.Printf("%-20s %8s\n", "ECOSYSTEM", "ENTRIES")
+	for _, e := range c.Ecosystems() {
+		fmt.Printf("%-20s %8d\n", e, c.Count(e))
+	}
 	return exitClean
 }
 
