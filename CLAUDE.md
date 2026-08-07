@@ -40,7 +40,7 @@ Seven packages under `internal/`, one per layer plus shared data sources:
 | `attack/` | — | load IoC lists as data (JSON) | DONE, tested |
 | `corpus/` | 1 | offline malicious-package lookup from cumulative datasets (DataDog, pypi_malregistry). NOT attack files — no forensic window. Loaded via `canary attacks -corpus` | DONE, tested |
 | `deps/` | 1 | lockfiles → malicious versions | extraction DONE, matching stub |
-| `ioc/` | 2 | filesystem artifacts + persistence | stub |
+| `ioc/` | 2 | filesystem artifacts + persistence, two families | DONE, tested |
 | `ci/` | 4 | GitHub Actions × attack window | stub |
 | `verdict/` | — | merge → per-repo answer → text/json/sarif | stub |
 | `datadir/` | — | where a data set is read from, shared by every source so a flag cannot mean two things | DONE, tested |

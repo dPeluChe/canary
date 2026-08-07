@@ -62,7 +62,13 @@ type Report struct {
 	Root    string   `json:"root"`
 	Attacks []string `json:"attacks"`
 	Repos   []Repo   `json:"repos"`
-	Gaps    []string `json:"gaps"` // what this run could NOT establish
+
+	// HomeFindings sit outside every repository — persistence in $HOME belongs
+	// to the machine, not to a project, and attributing it to one would be
+	// wrong in both directions.
+	HomeFindings []string `json:"homeFindings,omitempty"`
+
+	Gaps []string `json:"gaps"` // what this run could NOT establish
 }
 
 // Findings reports whether anything was found, which drives the exit code.
@@ -148,6 +154,14 @@ func (r *Report) text() string {
 		fmt.Fprintf(&b, "SKIPPED — %d repo(s) NOT checked\n", n)
 		for _, repo := range byStatus[Skipped] {
 			fmt.Fprintf(&b, "  %-40s %s\n", repo.Name, repo.Reason)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.HomeFindings) > 0 {
+		fmt.Fprintf(&b, "DEVELOPER MACHINE — %d persistence location(s) outside any repo\n", len(r.HomeFindings))
+		for _, f := range r.HomeFindings {
+			fmt.Fprintf(&b, "  %s\n", f)
 		}
 		b.WriteString("\n")
 	}
