@@ -53,14 +53,14 @@ func match(resolved []Resolved, attacks []attack.Attack, c *corpus.Corpus, check
 	var order []indexKey
 
 	for _, r := range resolved {
-		key := indexKey{strings.ToLower(r.Ecosystem), r.Name, r.Version}
+		key := indexKey{strings.ToLower(r.Ecosystem), attack.NormalizeName(r.Ecosystem, r.Name), r.Version}
 		if !checkVersion {
 			key.version = ""
 		}
 
 		var hitAttacks, hitSources []string
 
-		for _, ref := range idx[indexKey{strings.ToLower(r.Ecosystem), r.Name, ""}] {
+		for _, ref := range idx[indexKey{strings.ToLower(r.Ecosystem), attack.NormalizeName(r.Ecosystem, r.Name), ""}] {
 			if !checkVersion || ref.pkg.Matches(r.Ecosystem, r.Name, r.Version) {
 				hitAttacks = appendUnique(hitAttacks, ref.attackID)
 			}
@@ -123,7 +123,9 @@ func indexAttacks(attacks []attack.Attack) map[indexKey][]attackRef {
 	idx := map[indexKey][]attackRef{}
 	for _, a := range attacks {
 		for _, p := range a.Packages {
-			key := indexKey{strings.ToLower(p.Ecosystem), p.Name, ""}
+			// The index key must fold exactly as Matches folds, or the lookup
+			// short-circuits before the comparison it is meant to accelerate.
+			key := indexKey{strings.ToLower(p.Ecosystem), attack.NormalizeName(p.Ecosystem, p.Name), ""}
 			idx[key] = append(idx[key], attackRef{attackID: a.ID, pkg: p})
 		}
 	}

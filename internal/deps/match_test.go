@@ -148,6 +148,33 @@ func TestMatchIsCaseInsensitiveOnEcosystem(t *testing.T) {
 	}
 }
 
+// The index is a performance shortcut over Matches, so it must fold names
+// exactly as Matches does. When it did not, normalization was correct in the
+// unit test and the end-to-end scan still reported CLEAN — the lookup missed
+// before the comparison it exists to accelerate ever ran.
+func TestMatchIndexFoldsNamesLikeMatchesDoes(t *testing.T) {
+	atk := attack.Attack{
+		ID: "keyv-2026-08", Started: time.Now(),
+		Packages: []attack.Package{{Ecosystem: "npm", Name: "keyv", Versions: []string{"v6.0.0"}}},
+	}
+	// The lockfile spells both the name and the version differently.
+	got := Match([]Resolved{{Ecosystem: "npm", Name: "Keyv", Version: "6.0.0+build.7"}},
+		[]attack.Attack{atk}, nil)
+	if len(got) != 1 {
+		t.Fatalf("a vendor spelling must not hide a hit: got %d", len(got))
+	}
+
+	// PyPI folding must survive the index too.
+	pyAtk := attack.Attack{
+		ID: "py", Started: time.Now(),
+		Packages: []attack.Package{{Ecosystem: "PyPI", Name: "flask-login", Versions: []string{"1.0.0"}}},
+	}
+	if got := Match([]Resolved{{Ecosystem: "PyPI", Name: "Flask_Login", Version: "1.0.0"}},
+		[]attack.Attack{pyAtk}, nil); len(got) != 1 {
+		t.Fatalf("PEP 503 folding must reach the index: got %d", len(got))
+	}
+}
+
 func TestMatchWithNoSourcesFindsNothing(t *testing.T) {
 	if got := Match(resolved("keyv", "6.0.0"), nil, nil); len(got) != 0 {
 		t.Fatalf("no sources loaded means nothing can match, got %v", got)

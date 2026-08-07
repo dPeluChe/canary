@@ -50,8 +50,10 @@ type entryKey struct {
 	ecosystem, name string
 }
 
+// The name is folded exactly as attack.Package.Matches folds it, or a lookup
+// would miss an entry that matching would have hit.
 func keyFor(ecosystem, name string) entryKey {
-	return entryKey{strings.ToLower(ecosystem), name}
+	return entryKey{strings.ToLower(ecosystem), attack.NormalizeName(ecosystem, name)}
 }
 
 // datadogSubdirToOSV maps a DataDog samples/<subdir> to the OSV ecosystem
