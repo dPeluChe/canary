@@ -150,6 +150,78 @@ runs alone produces alarm without information.
 
 ---
 
+## Evaluated and declined
+
+Both checked directly on 7 Aug 2026, both proposed in good faith, both out.
+
+### [CVEProject/cvelistV5](https://github.com/CVEProject/cvelistV5) — 2.9k ★, 2.4 GB
+
+The official CVE list in JSON 5.0, updated continuously. **Already covered, and
+covered better, by the planned OSV.dev adapter.**
+
+Querying OSV for `lodash@4.17.15` returns six advisories and **all six carry
+CVE aliases**. OSV is CVE data already mapped to package ecosystems. Consuming
+the raw list would mean rebuilding that mapping — and the mapping is the hard
+part. `CVE-2024-21538` records its affected product as:
+
+```
+vendor = "n/a"   product = "cross-spawn"   collectionURL = null   packageName = null
+```
+
+Nothing there says npm. Turning `product: cross-spawn` into
+`npm/cross-spawn@<range>` is fuzzy vendor/product matching, which is exactly
+the work GHSA and OSV already did and maintain.
+
+Three more reasons it stays out: 2.4 GB against a manifest measured in
+kilobytes; **no LICENSE file** in the repository; and the category error —
+a CVE says a version *has a vulnerability*, a `MAL-` advisory says a version
+*is malicious on purpose*. canary is a compromise-forensics tool, not an SCA
+scanner, and `osv-scanner` and `trivy` do CVE better. See the top of this
+document.
+
+**Where it could still earn a place:** enrichment, never detection. A package
+already confirmed compromised, that *also* carries known CVEs, is a repo worth
+escalating. That is a reporting nicety once layer 1 has something to report,
+and it would come through OSV, not through 2.4 GB of raw records.
+
+### [lissy93/web-check](https://github.com/lissy93/web-check) — 34.4k ★, MIT
+
+Excellent tool, different product. It analyses a **live domain**: 35 checks, of
+which about 30 (DNS, TLS, ports, whois, shodan, traceroute, redirects, mail
+config, headers as served) require talking to a running host. canary never
+touches your infrastructure — it reads a tree of repositories, offline.
+
+Five of its checks correspond to files that exist in a repository:
+`robots-txt`, `sitemap`, `security-txt`, `social-tags`, `tech-stack`. A missing
+`robots.txt` is an SEO and hygiene matter, not a compromise indicator, and
+canary is not a linter.
+
+**But the question behind the proposal found a real gap**, and it is recorded
+below rather than declined with it.
+
+### The gap it surfaced: deploy-surface persistence
+
+Layer 2's documented persistence targets are all **developer-machine**: Claude
+Code hooks, VS Code `tasks.json`, shell profiles, git hooks. Nothing covers the
+other half — **files committed in a repository that get served verbatim to
+users**. A payload with a postinstall hook can write into `public/`, and what
+it writes ships on the next deploy.
+
+`robots.txt` is the least interesting member of that family. The ones that
+matter:
+
+| Target | Why it is worth checking |
+|---|---|
+| service worker (`sw.js`, `service-worker.js`) | persists **in the visitor's browser** and survives a clean redeploy until it is unregistered — the longest-lived foothold on this list |
+| `index.html` and other served HTML | an injected `<script src>` is the classic skimmer |
+| `_headers`, `netlify.toml`, `vercel.json`, `staticwebapp.config.json` | a weakened or removed CSP re-enables everything a CSP was blocking |
+| `.well-known/assetlinks.json`, `apple-app-site-association` | deep-link and app-association hijack |
+| `.well-known/security.txt` | a changed contact address quietly redirects vulnerability reports |
+
+Same rule as every other layer-2 target: check **content and mtime against the
+window**, and report them separately. This stays repo-local, read-only and
+offline — which is precisely why it belongs to canary and web-check does not.
+
 ## Additional consumable lists
 
 Re-checked August 2026. These are consumable *data* sources (lists/feeds),

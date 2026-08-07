@@ -33,7 +33,9 @@ Ordered so each step is provable before the next depends on it.
       manifest declared it. Reporting only, never filtering
 - [ ] Extractors for the non-npm lockfile kinds discover already finds
       (Cargo.lock, go.sum, requirements.txt, poetry.lock, Gemfile.lock, …)
-- [ ] Query OSV.dev for `MAL-` + CVE (online path), batched
+- [ ] Query OSV.dev for `MAL-` + CVE (online path), batched. This is also where
+      CVE data arrives: OSV already carries CVE aliases mapped to packages, so
+      CVEProject/cvelistV5 is not consumed directly — see TOOLING_LANDSCAPE
 - [x] **Self-validation mode**: `deps.MatchIgnoringVersions`, wired into `scan`.
       A run that never saw a single package from any attack family says so as a
       gap, because that negative is unproven
@@ -77,8 +79,14 @@ failure modes. `zizmor` stays the one exception, because it contributes
 
 - [ ] Artifact sweep with `PathScope` honored
 - [ ] Opt back into `node_modules` for this layer only
-- [ ] Persistence targets: Claude Code settings + hooks, VS Code `tasks.json`,
-      shell profiles, git hooks (global and per repo)
+- [ ] Persistence targets, developer machine: Claude Code settings + hooks,
+      VS Code `tasks.json`, shell profiles, git hooks (global and per repo)
+- [ ] Persistence targets, **deploy surface** — files committed in the repo that
+      ship to users, which a postinstall payload can write: service worker
+      (survives a clean redeploy, in the visitor's browser), served HTML,
+      `_headers` / `netlify.toml` / `vercel.json` CSP weakening,
+      `.well-known/assetlinks.json`, `.well-known/security.txt`.
+      Surfaced while evaluating web-check — see RESEARCH/TOOLING_LANDSCAPE.md
 - [ ] Check content **and** mtime against the window; report them separately
 
 ## Layer 4 — ci
