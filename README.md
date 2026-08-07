@@ -41,7 +41,7 @@ A forensic tool that modifies destroys the evidence it was sent to collect.
 At least one scanner in this space ships `--remediate`; that is a good reason
 not to run it.
 
-**Campaigns are data, not code.** When an attack breaks, the vendor IoC list is
+**Attacks are data, not code.** When an attack breaks, the vendor IoC list is
 public in hours while the OSV `MAL-` advisory can take days. Tools that compile
 their package list into source need a release per incident. `canary` loads a
 file.

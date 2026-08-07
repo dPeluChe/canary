@@ -6,18 +6,18 @@ Ordered so each step is provable before the next depends on it.
 
 - [x] `internal/discover` — tree walk, repo attribution, orphan lockfiles, tests
 - [x] Scaffold: module, CLI skeleton, exit-code contract, docs
-- [x] On-disk campaign format: **JSON, schema 1**, documented in
+- [x] On-disk attack format: **JSON, schema 1**, documented in
       ARCHITECTURE/DATA_MODEL.md
-- [x] `campaign.Load` + tests — all-or-nothing loading, `ErrNoCampaigns`,
+- [x] `attack.Load` + tests — all-or-nothing loading, `ErrNoAttacks`,
       unknown keys rejected, unscoped `filename` artifacts refused
 
-## Next — campaign loading
+## Next — attack loading
 
-- [ ] `scripts/fetch-campaign.sh` → converter from the Wiz CSV shape to that format
-- [ ] `canary campaign list` / `canary campaign show <id>`
-- [ ] Campaign dir resolution: `--campaigns`, `$CANARY_CAMPAIGN_DIR`, repo-local
-      `campaigns/`. `ErrNoCampaigns` and a missing dir must become a printed
-      Gap, never a silent zero-campaign scan
+- [ ] `scripts/fetch-attack.sh` → converter from the Wiz CSV shape to that format
+- [ ] `canary attacks list` / `canary attacks show <id>`
+- [ ] Attack dir resolution: `--attacks`, `$CANARY_ATTACK_DIR`, repo-local
+      `attacks/`. `ErrNoAttacks` and a missing dir must become a printed
+      Gap, never a silent zero-attack scan
 
 ## Layer 1 — deps
 
@@ -26,7 +26,7 @@ Ordered so each step is provable before the next depends on it.
       hundreds of packages for a lockfile whose manifest declares ~26. This is
       the bug that killed the reference project — pin it with a test before
       building on top
-- [ ] Match against loaded campaigns (offline path)
+- [ ] Match against loaded attacks (offline path)
 - [ ] Query OSV.dev for `MAL-` + CVE (online path), batched
 - [ ] **Self-validation mode**: re-run the match ignoring versions, to prove the
       extractor can see a package family at all. A negative from an unvalidated
@@ -56,7 +56,7 @@ Ordered so each step is provable before the next depends on it.
 - [ ] SARIF renderer
 - [ ] Exit codes wired
 - [ ] **Persist the resolved inventory** to `.canary/inventory.json`, not just
-      the verdict. Re-resolving 485 lockfiles to test one new campaign is
+      the verdict. Re-resolving 485 lockfiles to test one new attack is
       wasted work — and `watch` mode below depends on this artifact existing
 
 ## Layer 3 — delegation
@@ -67,13 +67,13 @@ Ordered so each step is provable before the next depends on it.
 
 Decided in scope. `canary watch` polls the **threat feeds**, not the
 filesystem — the asymmetry that makes it cheap is that your tree changes slowly
-while the campaign list changes daily. A tree that scanned clean today is not
+while the attack list changes daily. A tree that scanned clean today is not
 clean tomorrow, because tomorrow's attack was not published yet.
 
 ```
 canary watch --interval 6h
   1. poll OSV MAL- / OpenSSF malicious-packages / vendor lists
-  2. new campaign? → match against the ALREADY-RESOLVED inventory
+  2. new attack? → match against the ALREADY-RESOLVED inventory
   3. hit → alert.  no hit → stay silent
 ```
 
@@ -81,7 +81,7 @@ Step 2 is milliseconds because it reads `.canary/inventory.json` instead of
 re-walking. That artifact is the prerequisite — see the verdict section.
 
 - [ ] Feed pollers with etag/since handling
-- [ ] Match new campaigns against the cached inventory
+- [ ] Match new attacks against the cached inventory
 - [ ] Alert sink (stdout / exit code first; anything else later)
 - [ ] Staleness guard: refuse to stay silent on an inventory older than N days,
       since a silent watch over a stale inventory is worse than no watch
@@ -108,11 +108,11 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 
 ## Open questions
 
-- ~~Campaign format: YAML vs JSON?~~ **Resolved: JSON.** Rationale in
+- ~~Attack format: YAML vs JSON?~~ **Resolved: JSON.** Rationale in
   ARCHITECTURE/DATA_MODEL.md.
-- Should campaigns be vendored in-repo at all, or always fetched? Upstream
+- Should attacks be vendored in-repo at all, or always fetched? Upstream
   vendor lists have unclear licensing — the Wiz IoC repo publishes none.
-- Does a campaign need a window **end**? `Started` alone means the window runs
+- Does an attack need a window **end**? `Started` alone means the window runs
   to now, which is the conservative reading and is what layers 2 and 4 will do
   today. A closed window would tighten mtime evidence for an incident already
   contained. Not added unilaterally — it is a DATA_MODEL change.

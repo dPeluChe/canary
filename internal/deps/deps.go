@@ -7,7 +7,7 @@
 //
 //  1. OSV.dev — MAL- advisories from the OpenSSF malicious-packages feed,
 //     plus ordinary CVEs. Authoritative, but lags a breaking incident.
-//  2. Local campaigns — vendor IoC lists, available within hours.
+//  2. Local attack files — vendor IoC lists, available within hours.
 //
 // The hard requirement is TRANSITIVE COMPLETENESS. Supply-chain attacks land
 // in transitive dependencies, not direct ones: in the keyv incident the

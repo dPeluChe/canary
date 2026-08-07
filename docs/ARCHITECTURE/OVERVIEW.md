@@ -23,7 +23,7 @@
                     │   tui    │  optional viewer, never drives
                     └──────────┘
 
-        campaign — IoC data files, feeds deps + ioc
+        attack — IoC data files, feeds deps + ioc
 ```
 
 ## Layers
@@ -43,9 +43,9 @@ dropped payload lives.
 
 Verified against a real tree: 320 repos, 485 lockfiles.
 
-### campaign — IoC data
+### attack — IoC data
 
-A campaign is one incident: its window, its malicious package versions, its
+A attack is one incident: its window, its malicious package versions, its
 filesystem and network artifacts, and the URL of the report it came from.
 
 Loaded from files. Never compiled in. This is the difference between responding
@@ -57,14 +57,14 @@ Resolve every package version a lockfile pins — **including transitive and
 nested entries** — then check against two sources:
 
 1. **OSV.dev** — `MAL-` advisories plus CVEs. Authoritative, lags an incident.
-2. **Local campaigns** — vendor lists, available in hours.
+2. **Local attacks** — vendor lists, available in hours.
 
 Extraction delegates to `google/osv-scalibr`. Do not hand-write parsers; that
 is exactly the mistake documented in RESEARCH/SPARK_ANALYSIS.md.
 
 ### ioc — layer 2
 
-Sweep the filesystem for campaign artifacts (C2 domains, embedded strings,
+Sweep the filesystem for attack artifacts (C2 domains, embedded strings,
 dropped filenames) and check the persistence targets modern malware writes to:
 Claude Code hooks and settings, VS Code `tasks.json`, shell profiles, git hooks.
 

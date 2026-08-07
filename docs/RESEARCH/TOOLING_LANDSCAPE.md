@@ -87,7 +87,7 @@ filename. Matching it naively hit
 Unicode data file. The real indicator was that filename **inside the compromised
 package's own directory**.
 
-This is why `campaign.Artifact` carries a `PathScope`. A bare filename
+This is why `attack.Artifact` carries a `PathScope`. A bare filename
 indicator is a false-positive generator.
 
 ---

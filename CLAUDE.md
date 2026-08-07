@@ -37,7 +37,7 @@ Five packages under `internal/`, one per layer, plus a viewer:
 | Package | Layer | Responsibility | State |
 |---|---|---|---|
 | `discover/` | — | walk a tree → repos + lockfiles | DONE, tested |
-| `campaign/` | — | load IoC lists as data (JSON) | DONE, tested |
+| `attack/` | — | load IoC lists as data (JSON) | DONE, tested |
 | `deps/` | 1 | lockfiles → malicious versions | stub |
 | `ioc/` | 2 | filesystem artifacts + persistence | stub |
 | `ci/` | 4 | GitHub Actions × attack window | stub |
@@ -57,12 +57,12 @@ one because it seems convenient.
 
 1. **Read-only.** No write, move, delete, quarantine or auto-fix — ever. A
    forensic tool that modifies destroys its own evidence.
-2. **Campaigns are data files**, never compiled-in constants.
+2. **Attacks are data files**, never compiled-in constants.
 3. **Transitive completeness.** Any dependency check that only reads declared
    dependencies is wrong. This is the specific bug that made the reference
    project useless for this job.
 4. **Artifacts carry a path scope.** A bare filename indicator produces false
-   positives — see `campaign.Artifact.PathScope` and the `Math_Symbol.js` case
+   positives — see `attack.Artifact.PathScope` and the `Math_Symbol.js` case
    documented there.
 5. **Report coverage gaps explicitly.** Silent truncation that reads as
    complete coverage is the worst possible output.
