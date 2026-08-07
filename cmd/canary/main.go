@@ -3,12 +3,14 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
@@ -114,18 +116,23 @@ func cmdDiscover(args []string) int {
 // loaded" and "attacks loaded, nothing matched" are the pair this whole tool
 // exists to keep apart.
 func cmdAttacks(args []string) int {
-	flags := flag.NewFlagSet("attacks", flag.ExitOnError)
-	dir := flags.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
-	if err := flags.Parse(args); err != nil {
+	// Subcommand is taken before flag parsing so it can appear anywhere a user
+	// naturally types it, and so `import` gets its own unrelated flag set.
+	sub := "list"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	if sub == "import" {
+		return importAttack(args)
+	}
+	if sub != "list" && sub != "show" {
+		fmt.Fprintf(os.Stderr, "canary attacks: unknown subcommand %q (want list, show or import)\n", sub)
 		return exitError
 	}
 
-	sub := "list"
-	if flags.NArg() > 0 {
-		sub = flags.Arg(0)
-	}
-	if sub != "list" && sub != "show" {
-		fmt.Fprintf(os.Stderr, "canary attacks: unknown subcommand %q (want list or show)\n", sub)
+	flags := flag.NewFlagSet("attacks", flag.ExitOnError)
+	dir := flags.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
+	if err := flags.Parse(args); err != nil {
 		return exitError
 	}
 
@@ -147,11 +154,18 @@ func cmdAttacks(args []string) int {
 	}
 
 	if sub == "show" {
-		if flags.NArg() < 2 {
+		if flags.NArg() < 1 {
 			fmt.Fprintln(os.Stderr, "canary attacks show: needs an attack id")
 			return exitError
 		}
-		return showAttack(attacks, flags.Arg(1))
+		return showAttack(attacks, flags.Arg(0))
+	}
+
+	// `attacks -dir X show <id>` would otherwise run list and print a table,
+	// which is a wrong answer delivered confidently.
+	if flags.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "canary attacks list: unexpected argument %q — the subcommand goes first, e.g. `canary attacks show -dir <path> <id>`\n", flags.Arg(0))
+		return exitError
 	}
 
 	fmt.Printf("%d attack(s) from %s (%s)\n\n", len(attacks), resolved, source)
@@ -197,6 +211,63 @@ func showAttack(attacks []attack.Attack, id string) int {
 
 	fmt.Fprintf(os.Stderr, "canary: no attack with id %q among %d loaded\n", id, len(attacks))
 	return exitError
+}
+
+// importAttack converts a vendor CSV into an attack file on STDOUT. canary
+// never writes a file — redirect it yourself. That keeps the read-only
+// invariant literal rather than argued about.
+func importAttack(args []string) int {
+	flags := flag.NewFlagSet("attacks import", flag.ExitOnError)
+	csvPath := flags.String("csv", "", "vendor package list (CSV with Package / Malicious Versions columns)")
+	id := flags.String("id", "", "attack id, e.g. keyv-2026-08")
+	name := flags.String("name", "", "human label")
+	started := flags.String("started", "", "attack window start, RFC3339")
+	source := flags.String("source", "", "URL of the report this came from")
+	note := flags.String("note", "", "why this attack file exists")
+	ecosystem := flags.String("ecosystem", "npm", "OSV ecosystem for every row")
+	if err := flags.Parse(args); err != nil {
+		return exitError
+	}
+
+	if *csvPath == "" || *id == "" || *name == "" || *started == "" {
+		fmt.Fprintln(os.Stderr, "canary attacks import: -csv, -id, -name and -started are required")
+		fmt.Fprintln(os.Stderr, "  canary attacks import -csv keyv.csv -id keyv-2026-08 \\")
+		fmt.Fprintln(os.Stderr, "    -name 'keyv npm compromise' -started 2026-08-04T09:00:00Z \\")
+		fmt.Fprintln(os.Stderr, "    -source https://... > attacks/keyv-2026-08.json")
+		return exitError
+	}
+
+	when, err := time.Parse(time.RFC3339, *started)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "canary: -started must be RFC3339: %v\n", err)
+		return exitError
+	}
+
+	f, err := os.Open(*csvPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		return exitError
+	}
+	defer f.Close()
+
+	built, err := attack.FromCSV(f, *ecosystem, attack.Attack{
+		ID: *id, Name: *name, Started: when, Source: *source, Note: *note,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		return exitError
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(built); err != nil {
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		return exitError
+	}
+
+	fmt.Fprintf(os.Stderr, "canary: %d package(s) from %s — artifacts must be added by hand, the CSV carries none\n",
+		len(built.Packages), *csvPath)
+	return exitClean
 }
 
 func cmdScan(args []string) int {
