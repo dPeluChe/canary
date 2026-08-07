@@ -85,7 +85,7 @@ func cmdAttacksCorpus(flags *flag.FlagSet, dir, ecoFilter, wd string) int {
 		return exitError
 	}
 
-	c, err := corpus.LoadDataDog(resolved)
+	c, err := corpus.Load(resolved)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "canary: %s (%s)\n", resolved, source)
 		fmt.Fprintln(os.Stderr, "canary:", err)
@@ -127,8 +127,26 @@ func cmdAttacksCorpus(flags *flag.FlagSet, dir, ecoFilter, wd string) int {
 		return exitFindings
 	}
 
-	fmt.Printf("%d entries from %s (%s) — sources: %s\n\n",
-		c.Count(""), resolved, source, strings.Join(c.Sources(), ", "))
+	fmt.Printf("%d entries from %s (%s)\n\n", c.Count(""), resolved, source)
+
+	// Age is printed because refreshing is explicit: a list nobody updated in
+	// months reports clean just as confidently as a current one.
+	fetched := c.Fetched()
+	fmt.Printf("%-46s %s\n", "SOURCE", "LAST REFRESHED")
+	for _, s := range c.Sources() {
+		when, ok := fetched[s]
+		if !ok {
+			fmt.Printf("%-46s unknown\n", s)
+			continue
+		}
+		age := time.Since(when)
+		note := ""
+		if age > 7*24*time.Hour {
+			note = fmt.Sprintf("  STALE — %d days old, run `canary update`", int(age.Hours()/24))
+		}
+		fmt.Printf("%-46s %s%s\n", s, when.UTC().Format("2006-01-02"), note)
+	}
+	fmt.Println()
 	fmt.Printf("%-20s %8s\n", "ECOSYSTEM", "ENTRIES")
 	for _, e := range c.Ecosystems() {
 		fmt.Printf("%-20s %8d\n", e, c.Count(e))

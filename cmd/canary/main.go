@@ -33,6 +33,8 @@ func main() {
 		os.Exit(cmdAttacks(os.Args[2:]))
 	case "import":
 		os.Exit(cmdImport(os.Args[2:]))
+	case "update":
+		os.Exit(cmdUpdate(os.Args[2:]))
 	case "scan":
 		os.Exit(cmdScan(os.Args[2:]))
 	case "version", "--version", "-v":
@@ -61,6 +63,7 @@ COMMANDS
   attacks -corpus    Load a cumulative dataset (DataDog/pypi-mal) instead
   attacks -corpus <pkg>  Look up one package in a loaded corpus
   import -csv <f>    Convert a vendor CSV to an attack file, on stdout
+  update             Refresh the redistributable source lists
   scan <path>        Run the full sweep and emit a verdict per repo
   version            Print the version
 

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
 	"github.com/dPeluChe/canary/internal/datadir"
@@ -41,6 +42,21 @@ type Corpus struct {
 	entries map[entryKey]Entry
 	counts  map[string]int // per-ecosystem entry count
 	sources []string
+
+	// fetched records when each source list was last written. Staleness is the
+	// reason refreshing can stay explicit: a list nobody updated in months will
+	// happily report clean, so its age travels with it.
+	fetched map[string]time.Time
+}
+
+// Fetched returns when each source was last written, newest information the
+// caller has about how current the corpus is.
+func (c *Corpus) Fetched() map[string]time.Time {
+	out := map[string]time.Time{}
+	for k, v := range c.fetched {
+		out[k] = v
+	}
+	return out
 }
 
 // Ecosystem is folded for the key because attack.Package.Matches compares it
@@ -141,6 +157,65 @@ const EnvDir = "CANARY_CORPUS_DIR"
 // it points at.
 func ResolveDir(explicit, workdir string) (dir, source string, err error) {
 	return datadir.Resolve(explicit, workdir, EnvDir, "corpus")
+}
+
+// Merge folds another corpus into c, so a run can consult several sources as
+// one. It goes through add, so the widening rule and per-entry provenance hold
+// across sources exactly as they do within one.
+func (c *Corpus) Merge(other *Corpus) {
+	if other == nil {
+		return
+	}
+	if c.entries == nil {
+		c.entries = map[entryKey]Entry{}
+		c.counts = map[string]int{}
+	}
+	for _, e := range other.entries {
+		c.add(e)
+	}
+	for _, s := range other.sources {
+		if !slicesContains(c.sources, s) {
+			c.sources = append(c.sources, s)
+		}
+	}
+}
+
+// Load reads every source present in dir and merges them. It is what a scan
+// uses: one corpus from however many lists happen to be cached.
+//
+// A directory holding nothing recognisable is an error rather than an empty
+// corpus, for the reason ErrNoAttacks exists — a scan with nothing loaded
+// reports clean exactly like a scan that never ran.
+func Load(dir string) (*Corpus, error) {
+	out := &Corpus{entries: map[entryKey]Entry{}, counts: map[string]int{}}
+
+	out.fetched = map[string]time.Time{}
+	if c, err := LoadDataDog(dir); err == nil {
+		out.Merge(c)
+		if fi, statErr := os.Stat(filepath.Join(dir, "samples")); statErr == nil {
+			out.fetched[c.sources[0]] = fi.ModTime()
+		}
+	}
+	if path := filepath.Join(dir, "shai-hulud.txt"); fileExists(path) {
+		c, err := LoadShaiHulud(path)
+		if err != nil {
+			return nil, err
+		}
+		out.Merge(c)
+		if fi, statErr := os.Stat(path); statErr == nil {
+			out.fetched[ShaiHuludSource] = fi.ModTime()
+		}
+	}
+
+	if out.Count("") == 0 {
+		return nil, fmt.Errorf("corpus: %s: no source lists found (run `canary update`)", dir)
+	}
+	return out, nil
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
 }
 
 // LoadDataDog reads every samples/<subdir>/manifest.json under dir (a cloned
