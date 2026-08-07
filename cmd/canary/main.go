@@ -3,11 +3,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/dPeluChe/canary/internal/attack"
 	"github.com/dPeluChe/canary/internal/discover"
 )
 
@@ -29,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "discover":
 		os.Exit(cmdDiscover(os.Args[2:]))
+	case "attacks":
+		os.Exit(cmdAttacks(os.Args[2:]))
 	case "scan":
 		os.Exit(cmdScan(os.Args[2:]))
 	case "version", "--version", "-v":
@@ -52,6 +58,7 @@ USAGE
 
 COMMANDS
   discover   Inventory repos and lockfiles under a path
+  attacks    List or show the known attacks canary can match against
   scan       Run the full sweep and emit a verdict per repo
   version    Print the version
 
@@ -100,6 +107,96 @@ func cmdDiscover(args []string) int {
 	fmt.Printf("\n%d repos · %d lockfiles · %d orphan lockfiles under %s\n",
 		len(res.Repos), res.CountLockfiles(), len(res.Orphans), res.Root)
 	return exitClean
+}
+
+// cmdAttacks lists or shows the attack data files canary matches against. It
+// always prints which directory it read and why that one, because "no attacks
+// loaded" and "attacks loaded, nothing matched" are the pair this whole tool
+// exists to keep apart.
+func cmdAttacks(args []string) int {
+	flags := flag.NewFlagSet("attacks", flag.ExitOnError)
+	dir := flags.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
+	if err := flags.Parse(args); err != nil {
+		return exitError
+	}
+
+	sub := "list"
+	if flags.NArg() > 0 {
+		sub = flags.Arg(0)
+	}
+	if sub != "list" && sub != "show" {
+		fmt.Fprintf(os.Stderr, "canary attacks: unknown subcommand %q (want list or show)\n", sub)
+		return exitError
+	}
+
+	wd, _ := os.Getwd()
+	resolved, source, err := attack.ResolveDir(*dir, wd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		return exitError
+	}
+
+	attacks, err := attack.Load(resolved)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "canary: %s (%s)\n", resolved, source)
+		fmt.Fprintln(os.Stderr, "canary:", err)
+		if errors.Is(err, attack.ErrNoAttacks) || errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintln(os.Stderr, "        fetch a list with scripts/fetch-attack.sh, or pass -dir")
+		}
+		return exitError
+	}
+
+	if sub == "show" {
+		if flags.NArg() < 2 {
+			fmt.Fprintln(os.Stderr, "canary attacks show: needs an attack id")
+			return exitError
+		}
+		return showAttack(attacks, flags.Arg(1))
+	}
+
+	fmt.Printf("%d attack(s) from %s (%s)\n\n", len(attacks), resolved, source)
+	fmt.Printf("%-20s %-12s %8s %10s  %s\n", "ID", "STARTED", "PACKAGES", "ARTIFACTS", "NAME")
+	for _, a := range attacks {
+		fmt.Printf("%-20s %-12s %8d %10d  %s\n",
+			a.ID, a.Started.UTC().Format("2006-01-02"), len(a.Packages), len(a.Artifacts), a.Name)
+	}
+	return exitClean
+}
+
+func showAttack(attacks []attack.Attack, id string) int {
+	for _, a := range attacks {
+		if a.ID != id {
+			continue
+		}
+		fmt.Printf("%s — %s\n", a.ID, a.Name)
+		fmt.Printf("window starts  %s\n", a.Started.UTC().Format(time.RFC3339))
+		fmt.Printf("source         %s\n", a.Source)
+		fmt.Printf("file           %s\n", a.File)
+		if a.Note != "" {
+			fmt.Printf("note           %s\n", a.Note)
+		}
+
+		fmt.Printf("\nPACKAGES (%d)\n", len(a.Packages))
+		for _, p := range a.Packages {
+			fmt.Printf("  %-12s %-32s %s\n", p.Ecosystem, p.Name, p.VersionLabel())
+		}
+
+		fmt.Printf("\nARTIFACTS (%d)\n", len(a.Artifacts))
+		for _, art := range a.Artifacts {
+			scope := art.PathScope
+			if scope == "" {
+				scope = "(anywhere)"
+			}
+			fmt.Printf("  %-10s %-34s under %s\n", art.Kind, art.Value, scope)
+			if art.Note != "" {
+				fmt.Printf("             %s\n", art.Note)
+			}
+		}
+		return exitClean
+	}
+
+	fmt.Fprintf(os.Stderr, "canary: no attack with id %q among %d loaded\n", id, len(attacks))
+	return exitError
 }
 
 func cmdScan(args []string) int {

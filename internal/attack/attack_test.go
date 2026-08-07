@@ -187,6 +187,68 @@ func TestLoadRejectsUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func TestResolveDirPrecedence(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "attacks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(EnvDir, "/from/env")
+	if dir, src, _ := ResolveDir("/from/flag", work); dir != "/from/flag" || src != SourceFlag {
+		t.Errorf("flag should win: got %q via %q", dir, src)
+	}
+	if dir, src, _ := ResolveDir("", work); dir != "/from/env" || src != SourceEnv {
+		t.Errorf("env should beat repo-local: got %q via %q", dir, src)
+	}
+
+	t.Setenv(EnvDir, "")
+	dir, src, err := ResolveDir("", work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != filepath.Join(work, "attacks") || src != SourceRepo {
+		t.Errorf("repo-local should win when it exists: got %q via %q", dir, src)
+	}
+
+	if _, src, _ := ResolveDir("", t.TempDir()); src != SourceDefault {
+		t.Errorf("no repo-local dir should fall through to default, got %q", src)
+	}
+}
+
+// A requested directory that does not exist must NOT fall through to another
+// one — that would scan against a different list than the one asked for.
+func TestResolveDirDoesNotFallThroughOnMissingExplicitDir(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, "attacks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "nope")
+
+	dir, src, err := ResolveDir(missing, work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != missing || src != SourceFlag {
+		t.Fatalf("want the missing dir returned as-is, got %q via %q", dir, src)
+	}
+	if _, err := Load(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("caller must see fs.ErrNotExist, got %v", err)
+	}
+}
+
+// An empty versions list matches every version. Rendering it as blank would
+// make the most dangerous entry look like the emptiest one.
+func TestVersionLabelNamesTheAllVersionsCase(t *testing.T) {
+	all := Package{Ecosystem: "npm", Name: "evil"}
+	if got := all.VersionLabel(); got != "ALL VERSIONS" {
+		t.Errorf("empty versions: got %q", got)
+	}
+	pinned := Package{Ecosystem: "npm", Name: "keyv", Versions: []string{"6.0.0", "6.0.1"}}
+	if got := pinned.VersionLabel(); got != "6.0.0, 6.0.1" {
+		t.Errorf("pinned: got %q", got)
+	}
+}
+
 func TestPackageMatches(t *testing.T) {
 	pinned := Package{Ecosystem: "npm", Name: "keyv", Versions: []string{"6.0.0"}}
 	if !pinned.Matches("npm", "keyv", "6.0.0") {

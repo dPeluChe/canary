@@ -11,13 +11,15 @@ Ordered so each step is provable before the next depends on it.
 - [x] `attack.Load` + tests — all-or-nothing loading, `ErrNoAttacks`,
       unknown keys rejected, unscoped `filename` artifacts refused
 
+- [x] `canary attacks list` / `canary attacks show <id>`
+- [x] Attack dir resolution: `-dir`, `$CANARY_ATTACK_DIR`, repo-local
+      `attacks/`, `~/.canary/attacks`. Every run prints which directory it read
+      and which source chose it; an explicit dir that is missing errors instead
+      of falling through to another one
+
 ## Next — attack loading
 
 - [ ] `scripts/fetch-attack.sh` → converter from the Wiz CSV shape to that format
-- [ ] `canary attacks list` / `canary attacks show <id>`
-- [ ] Attack dir resolution: `--attacks`, `$CANARY_ATTACK_DIR`, repo-local
-      `attacks/`. `ErrNoAttacks` and a missing dir must become a printed
-      Gap, never a silent zero-attack scan
 
 ## Layer 1 — deps
 

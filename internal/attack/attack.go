@@ -93,6 +93,44 @@ type Artifact struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// Sources an attack directory can come from, in precedence order.
+const (
+	SourceFlag    = "flag"
+	SourceEnv     = "$CANARY_ATTACK_DIR"
+	SourceRepo    = "repo-local attacks/"
+	SourceDefault = "default"
+)
+
+// EnvDir is the environment variable scripts/fetch-attack.sh writes into.
+const EnvDir = "CANARY_ATTACK_DIR"
+
+// ResolveDir picks which directory to load attacks from, and reports which
+// source chose it so output can name it.
+//
+// An explicit flag or env value is returned WITHOUT checking that it exists.
+// Falling through to another directory because the requested one is missing
+// would silently scan against the wrong list — the caller must see the
+// resulting fs.ErrNotExist instead.
+func ResolveDir(explicit, workdir string) (dir, source string, err error) {
+	if explicit != "" {
+		return explicit, SourceFlag, nil
+	}
+	if v := os.Getenv(EnvDir); v != "" {
+		return v, SourceEnv, nil
+	}
+	if workdir != "" {
+		local := filepath.Join(workdir, "attacks")
+		if fi, statErr := os.Stat(local); statErr == nil && fi.IsDir() {
+			return local, SourceRepo, nil
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("attack: no directory given and home is unreadable: %w", err)
+	}
+	return filepath.Join(home, ".canary", "attacks"), SourceDefault, nil
+}
+
 // Load reads every *.json attack file in dir, non-recursively. Subdirectories are
 // skipped: scripts/fetch-attack.sh clones whole upstream repos underneath.
 //
@@ -208,6 +246,15 @@ func (c *Attack) validate() error {
 	}
 
 	return nil
+}
+
+// VersionLabel renders Versions for display. An empty list matches every
+// version, and printing an empty column would hide that.
+func (p Package) VersionLabel() string {
+	if len(p.Versions) == 0 {
+		return "ALL VERSIONS"
+	}
+	return strings.Join(p.Versions, ", ")
 }
 
 // Matches reports whether ecosystem/name@version is covered by p.
