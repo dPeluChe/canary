@@ -6,13 +6,22 @@ You have a folder with 80 repos in it. A registry gets compromised at 09:00 UTC.
 Which of your projects is affected, which CI runner installed the bad version,
 and did anything persist? `canary` answers that in one pass.
 
-> **Status: early scaffold.** The `discover` layer works. The other four are
-> designed and stubbed. See [docs/TASK_TODO.md](docs/TASK_TODO.md).
+> **Status: early scaffold.** `discover` and the attack data layer work. The
+> four scanning layers are designed and stubbed. See
+> [docs/TASK_TODO.md](docs/TASK_TODO.md).
 
 ```
 canary discover ~/code            # inventory: repos + lockfiles
+canary attacks list               # known attacks canary can match against
+canary attacks show keyv-2026-08  # one attack in full
 canary scan ~/code --since 2026-08-04T09:00:00Z
 ```
+
+An *attack* is the attacker's, not yours: one registry compromise expressed as
+a data file — its window, the package versions it poisoned, and the traces it
+leaves on disk. You run scans **against** them. New attacks are published
+constantly, which is why they are files you drop in rather than constants
+compiled into a release.
 
 ## Why this exists
 
