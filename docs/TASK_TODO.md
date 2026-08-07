@@ -17,15 +17,21 @@ Ordered so each step is provable before the next depends on it.
       of falling through to another one
 - [x] `canary attacks import` — converter from the vendor CSV shape. Verified on
       the real Wiz list: 446 packages, round-tripped back through Load
+- [x] Wire `google/osv-scalibr` for extraction (npm family: package-lock,
+      npm-shrinkwrap, yarn, pnpm, bun.lock). Other kinds return an explicit
+      unsupported error, never an empty result
+- [x] **Transitive completeness proven**: 791 resolved against 26 declared in
+      the fixture, and the test was verified to go red when extraction is
+      replaced with spark's manifest-based model. Real lockfiles: 288 from 26
+      declared, 956 from 68
 
 ## Next — Layer 1, deps
 
-- [ ] Wire `google/osv-scalibr` for extraction
-- [ ] **Prove transitive completeness first**: assert the extractor returns
-      hundreds of packages for a lockfile whose manifest declares ~26. This is
-      the bug that killed the reference project — pin it with a test before
-      building on top
-- [ ] Match against loaded attacks (offline path)
+- [ ] Match resolved packages against loaded attacks (offline path)
+- [ ] Populate `Resolved.Direct` — scalibr reports dep *groups*, not whether the
+      manifest declared it. Reporting only, never filtering
+- [ ] Extractors for the non-npm lockfile kinds discover already finds
+      (Cargo.lock, go.sum, requirements.txt, poetry.lock, Gemfile.lock, …)
 - [ ] Query OSV.dev for `MAL-` + CVE (online path), batched
 - [ ] **Self-validation mode**: re-run the match ignoring versions, to prove the
       extractor can see a package family at all. A negative from an unvalidated
