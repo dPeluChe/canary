@@ -163,8 +163,9 @@ re-walking. That artifact is the prerequisite — see the verdict section.
       real defects, not only to pass
 - [x] Tests for `verdict` — section ordering, gaps always printed, `Status`
       JSON name, and `Findings()` counting `HomeFindings`
-- [ ] **Verify invariant 3 per format**: `deps.Extract` claims five lockfile
-      kinds; only package-lock.json was ever proven transitively complete
+- [x] **Invariant 3 verified per format**: all five kinds resolve 301 packages
+      against 8 declared, each finding a transitive `keyv@6.0.0` absent from the
+      manifest. All five go red when extraction is replaced with spark's model
 - [ ] Audit `attack`, `corpus` and `datadir` for load-time drops — a version
       range or artifact silently lost there is the same false negative class
 - [ ] Prove invariant 1 rather than asserting it: trace syscalls on a real scan
