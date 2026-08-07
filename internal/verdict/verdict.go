@@ -124,6 +124,9 @@ func (r *Report) text() string {
 			for _, d := range repo.MaliciousDeps {
 				fmt.Fprintf(&b, "    %s\n", d)
 			}
+			for _, a := range repo.Artifacts {
+				fmt.Fprintf(&b, "    %s\n", a)
+			}
 			if repo.Reason != "" {
 				fmt.Fprintf(&b, "    %s\n", repo.Reason)
 			}

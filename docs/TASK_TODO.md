@@ -77,8 +77,12 @@ failure modes. `zizmor` stays the one exception, because it contributes
 
 ## Layer 2 — ioc
 
-- [ ] Artifact sweep with `PathScope` honored
-- [ ] Opt back into `node_modules` for this layer only
+- [x] Artifact sweep with `PathScope` honored — `**` matcher written here because
+      stdlib `filepath.Match` does not implement it; the Math_Symbol.js pair is
+      pinned by a test
+- [x] Opt back into `node_modules` for this layer only. ~33k files/s with
+      bounded concurrency; a very large tree is still minutes, and `-sweep=false`
+      is the escape for a dependency-only pass
 - [ ] Persistence targets, developer machine: Claude Code settings + hooks,
       VS Code `tasks.json`, shell profiles, git hooks (global and per repo)
 - [ ] Persistence targets, **deploy surface** — files committed in the repo that
@@ -87,7 +91,8 @@ failure modes. `zizmor` stays the one exception, because it contributes
       `_headers` / `netlify.toml` / `vercel.json` CSP weakening,
       `.well-known/assetlinks.json`, `.well-known/security.txt`.
       Surfaced while evaluating web-check — see RESEARCH/TOOLING_LANDSCAPE.md
-- [ ] Check content **and** mtime against the window; report them separately
+- [x] Check content **and** mtime against the window; reported separately, and
+      no window given means nothing is claimed to be inside one
 
 ## Layer 4 — ci
 
