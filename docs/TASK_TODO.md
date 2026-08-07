@@ -158,9 +158,11 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 
 ## From the adversarial audit
 
-- [ ] **Tests for `cmd/canary`** — the orchestration has none, and three of the
-      audit's four defects lived there. Status precedence, what each status
-      prints, and the exit code contract all need pinning
+- [x] **Tests for `cmd/canary`** — status precedence, what each status prints,
+      the exit code contract, orphan coverage. Verified to go red against the
+      real defects, not only to pass
+- [x] Tests for `verdict` — section ordering, gaps always printed, `Status`
+      JSON name, and `Findings()` counting `HomeFindings`
 - [ ] **Verify invariant 3 per format**: `deps.Extract` claims five lockfile
       kinds; only package-lock.json was ever proven transitively complete
 - [ ] Audit `attack`, `corpus` and `datadir` for load-time drops — a version

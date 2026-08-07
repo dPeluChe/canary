@@ -72,7 +72,15 @@ type Report struct {
 }
 
 // Findings reports whether anything was found, which drives the exit code.
+//
+// HomeFindings count. They are stored apart from Repos because persistence in
+// $HOME belongs to the machine rather than a project, and leaving them out of
+// this check made the exit code disagree with the printed report: a C2 domain
+// in ~/.zshrc printed under DEVELOPER MACHINE while the process exited 0.
 func (r *Report) Findings() bool {
+	if len(r.HomeFindings) > 0 {
+		return true
+	}
 	for _, repo := range r.Repos {
 		if repo.Status == Confirmed || repo.Status == Suspected {
 			return true
