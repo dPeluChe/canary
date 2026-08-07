@@ -79,13 +79,16 @@ func cmdScan(args []string) int {
 			fmt.Fprintln(os.Stderr, "canary:", err)
 			return exitError
 		} else {
-			rep.AddGap("no corpus dataset loaded (%s) — cumulative sources not consulted", corpusPath)
+			// The reason matters: a corrupt corpus and an absent one are
+			// different problems, and "not consulted" alone hides which.
+			rep.AddGap("no corpus dataset loaded (%s): %v — cumulative sources not consulted", corpusPath, err)
 		}
 	}
 
 	// Layer 2 runs once over the whole tree rather than per repo: it opts back
 	// into node_modules, and walking that twice for nested repos would double
 	// the most expensive part of a scan.
+	window := earliestWindow(attacks)
 	sweep := &ioc.Result{}
 	switch {
 	case !*sweepOn:
@@ -93,7 +96,7 @@ func cmdScan(args []string) int {
 	case artifactCount(attacks) == 0:
 		rep.AddGap("no attack file carries filesystem artifacts, so the tree was not searched for any")
 	default:
-		sweep, err = ioc.Sweep(inv.Root, attacks, ioc.Options{Window: earliestWindow(attacks)})
+		sweep, err = ioc.Sweep(inv.Root, attacks, ioc.Options{Window: window})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "canary:", err)
 			return exitError
@@ -103,7 +106,6 @@ func cmdScan(args []string) int {
 		}
 	}
 
-	window := earliestWindow(attacks)
 	for _, repo := range inv.Repos {
 		if pr, err := ioc.Persistence(repo.Path, ioc.RepoTargets, attacks, ioc.Options{Window: window}); err == nil {
 			sweep.Merge(pr)
