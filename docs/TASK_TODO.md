@@ -10,18 +10,15 @@ Ordered so each step is provable before the next depends on it.
       ARCHITECTURE/DATA_MODEL.md
 - [x] `attack.Load` + tests — all-or-nothing loading, `ErrNoAttacks`,
       unknown keys rejected, unscoped `filename` artifacts refused
-
 - [x] `canary attacks list` / `canary attacks show <id>`
 - [x] Attack dir resolution: `-dir`, `$CANARY_ATTACK_DIR`, repo-local
       `attacks/`, `~/.canary/attacks`. Every run prints which directory it read
       and which source chose it; an explicit dir that is missing errors instead
       of falling through to another one
+- [x] `canary attacks import` — converter from the vendor CSV shape. Verified on
+      the real Wiz list: 446 packages, round-tripped back through Load
 
-## Next — attack loading
-
-- [ ] `scripts/fetch-attack.sh` → converter from the Wiz CSV shape to that format
-
-## Layer 1 — deps
+## Next — Layer 1, deps
 
 - [ ] Wire `google/osv-scalibr` for extraction
 - [ ] **Prove transitive completeness first**: assert the extractor returns
