@@ -44,7 +44,7 @@ Upstream lists are not attack files yet. Convert one — CSV parsing lives in Go
 because 358 of the 446 rows in the keyv list quote their version lists, and
 splitting those on commas in shell corrupts them silently:
 
-  canary attacks import -csv $target/reports/<report>.csv \\
+  canary import -csv $target/reports/<report>.csv \\
     -id <id> -name '<label>' -started <RFC3339> -source <url> \\
     > $DEST/<id>.json
 

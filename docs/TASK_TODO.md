@@ -10,12 +10,12 @@ Ordered so each step is provable before the next depends on it.
       ARCHITECTURE/DATA_MODEL.md
 - [x] `attack.Load` + tests — all-or-nothing loading, `ErrNoAttacks`,
       unknown keys rejected, unscoped `filename` artifacts refused
-- [x] `canary attacks list` / `canary attacks show <id>`
+- [x] `canary attacks` / `canary attacks <id>`
 - [x] Attack dir resolution: `-dir`, `$CANARY_ATTACK_DIR`, repo-local
       `attacks/`, `~/.canary/attacks`. Every run prints which directory it read
       and which source chose it; an explicit dir that is missing errors instead
       of falling through to another one
-- [x] `canary attacks import` — converter from the vendor CSV shape. Verified on
+- [x] `canary import` — converter from the vendor CSV shape. Verified on
       the real Wiz list: 446 packages, round-tripped back through Load
 - [x] Wire `google/osv-scalibr` for extraction (npm family: package-lock,
       npm-shrinkwrap, yarn, pnpm, bun.lock). Other kinds return an explicit
@@ -36,6 +36,28 @@ Ordered so each step is provable before the next depends on it.
 - [ ] **Self-validation mode**: re-run the match ignoring versions, to prove the
       extractor can see a package family at all. A negative from an unvalidated
       parser is worthless — see JOURNAL/2608.md
+
+## attacks as the multi-source centre
+
+Decided: several sources, not one. Each entry carries **provenance** (which
+source called it malicious), and every run prints which sources it reached —
+an unreachable source is a gap, never a silence.
+
+- [ ] `canary update` — explicit refresh. Never automatic on a read command:
+      a network call as a side effect costs reproducibility, and forensics has
+      to be able to say "I scanned against exactly this list"
+- [ ] Source adapter: **OSV.dev** `querybatch` (free, authoritative, lags days)
+- [ ] Source adapter: **OpenSSF malicious-packages** (Apache, clonable, OSV format)
+- [ ] Source adapter: **Cobenian/shai-hulud-detect** (MIT, 5,752 `name:version`,
+      actively maintained — correct TOOLING_LANDSCAPE, which implies otherwise)
+- [ ] Staleness surfaced in `canary attacks`: age per source, loud when old
+- [ ] Vendor CSVs stay manual via `canary import` — no licence to redistribute
+
+Not adapters, deliberately: Socket (service with auth, not a list) and the other
+scanners surveyed in TOOLING_LANDSCAPE. Consuming a data source is cheap and
+uncoupled; invoking another tool couples canary to its CLI, output format and
+failure modes. `zizmor` stays the one exception, because it contributes
+*analysis*, not data.
 
 ## Layer 2 — ioc
 
@@ -103,7 +125,9 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 
 ## Later
 
-- [ ] TUI viewer (bubbletea v1)
+- [ ] TUI viewer (bubbletea v1), `canary view [report.json]` — two screens:
+      finished reports, and an attack-catalogue browser (446 packages is an
+      unreadable terminal dump). Viewer only: it never drives a scan
 - [ ] Gitleaks integration for secrets
 - [ ] Ignore-file support (spark's `.sparkauditignore` model)
 - [ ] Per-repo tags to scope sweeps (own repos vs third-party clones)

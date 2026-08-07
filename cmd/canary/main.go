@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
@@ -37,6 +36,8 @@ func main() {
 		os.Exit(cmdDiscover(os.Args[2:]))
 	case "attacks":
 		os.Exit(cmdAttacks(os.Args[2:]))
+	case "import":
+		os.Exit(cmdImport(os.Args[2:]))
 	case "scan":
 		os.Exit(cmdScan(os.Args[2:]))
 	case "version", "--version", "-v":
@@ -59,12 +60,16 @@ USAGE
   canary <command> [flags] [path]
 
 COMMANDS
-  discover   Inventory repos and lockfiles under a path
-  attacks    List or show the known attacks canary can match against
-  scan       Run the full sweep and emit a verdict per repo
-  version    Print the version
+  discover <path>    Inventory repos and lockfiles under a path
+  attacks            Known attacks canary can match against
+  attacks <id>       One attack in full
+  import -csv <f>    Convert a vendor CSV to an attack file, on stdout
+  scan <path>        Run the full sweep and emit a verdict per repo
+  version            Print the version
 
 Run "canary <command> -h" for command flags.
+
+No command takes more than two words. Anything longer is a flag.
 
 canary never writes to what it scans. There is no remediation flag by design:
 a forensic tool that modifies destroys the evidence it was sent to collect.
@@ -116,20 +121,6 @@ func cmdDiscover(args []string) int {
 // loaded" and "attacks loaded, nothing matched" are the pair this whole tool
 // exists to keep apart.
 func cmdAttacks(args []string) int {
-	// Subcommand is taken before flag parsing so it can appear anywhere a user
-	// naturally types it, and so `import` gets its own unrelated flag set.
-	sub := "list"
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		sub, args = args[0], args[1:]
-	}
-	if sub == "import" {
-		return importAttack(args)
-	}
-	if sub != "list" && sub != "show" {
-		fmt.Fprintf(os.Stderr, "canary attacks: unknown subcommand %q (want list, show or import)\n", sub)
-		return exitError
-	}
-
 	flags := flag.NewFlagSet("attacks", flag.ExitOnError)
 	dir := flags.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
 	if err := flags.Parse(args); err != nil {
@@ -153,18 +144,13 @@ func cmdAttacks(args []string) int {
 		return exitError
 	}
 
-	if sub == "show" {
-		if flags.NArg() < 1 {
-			fmt.Fprintln(os.Stderr, "canary attacks show: needs an attack id")
-			return exitError
-		}
+	// A positional argument is an attack id. There is no list/show subcommand:
+	// `canary attacks` already means "show me the attacks".
+	if flags.NArg() == 1 {
 		return showAttack(attacks, flags.Arg(0))
 	}
-
-	// `attacks -dir X show <id>` would otherwise run list and print a table,
-	// which is a wrong answer delivered confidently.
-	if flags.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "canary attacks list: unexpected argument %q — the subcommand goes first, e.g. `canary attacks show -dir <path> <id>`\n", flags.Arg(0))
+	if flags.NArg() > 1 {
+		fmt.Fprintf(os.Stderr, "canary attacks: one attack id at a time, got %d arguments\n", flags.NArg())
 		return exitError
 	}
 
@@ -213,11 +199,11 @@ func showAttack(attacks []attack.Attack, id string) int {
 	return exitError
 }
 
-// importAttack converts a vendor CSV into an attack file on STDOUT. canary
+// cmdImport converts a vendor CSV into an attack file on STDOUT. canary
 // never writes a file — redirect it yourself. That keeps the read-only
 // invariant literal rather than argued about.
-func importAttack(args []string) int {
-	flags := flag.NewFlagSet("attacks import", flag.ExitOnError)
+func cmdImport(args []string) int {
+	flags := flag.NewFlagSet("import", flag.ExitOnError)
 	csvPath := flags.String("csv", "", "vendor package list (CSV with Package / Malicious Versions columns)")
 	id := flags.String("id", "", "attack id, e.g. keyv-2026-08")
 	name := flags.String("name", "", "human label")
@@ -230,8 +216,8 @@ func importAttack(args []string) int {
 	}
 
 	if *csvPath == "" || *id == "" || *name == "" || *started == "" {
-		fmt.Fprintln(os.Stderr, "canary attacks import: -csv, -id, -name and -started are required")
-		fmt.Fprintln(os.Stderr, "  canary attacks import -csv keyv.csv -id keyv-2026-08 \\")
+		fmt.Fprintln(os.Stderr, "canary import: -csv, -id, -name and -started are required")
+		fmt.Fprintln(os.Stderr, "  canary import -csv keyv.csv -id keyv-2026-08 \\")
 		fmt.Fprintln(os.Stderr, "    -name 'keyv npm compromise' -started 2026-08-04T09:00:00Z \\")
 		fmt.Fprintln(os.Stderr, "    -source https://... > attacks/keyv-2026-08.json")
 		return exitError

@@ -41,6 +41,14 @@ implementing:
   anything." Same posture canary takes.
 - Package list maintained by PR, citing Socket / StepSecurity / Aikido
 
+**Re-checked August 2026 — it is also a data source, and canary should consume
+it.** `compromised-packages.txt` is a plain `name:version` list, 5,752 entries
+spanning several campaigns from September 2025, under **MIT**, with commits
+within the last day. MIT matters: unlike the vendor CSVs, whose licensing is
+unstated, this list can be redistributed and derived from. It is wired as a
+source adapter — see TASK_TODO. Note this is a *list*, not a tool canary
+invokes; the difference is the whole point of the section below.
+
 ### Others worth knowing
 
 - **[safedep/vet](https://github.com/safedep/vet)** — policy as CEL, malware
