@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +26,7 @@ func cmdScan(args []string) int {
 	corpusDir := fs.String("corpus", "", "corpus dataset to consult as well (default: $CANARY_CORPUS_DIR, ./corpus)")
 	format := fs.String("format", "text", "output format: text|json|sarif")
 	sweepOn := fs.Bool("sweep", true, "layer 2 artifact sweep; walks node_modules, so it costs minutes on a large tree")
+	homeOn := fs.Bool("home", true, "also inspect persistence targets in $HOME (agent hooks, shell profiles) — outside the scanned tree")
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
@@ -98,7 +98,34 @@ func cmdScan(args []string) int {
 		}
 	}
 
-	rep.AddGap("persistence targets (Claude Code hooks, VS Code tasks.json, shell profiles, git hooks) are not checked yet")
+	window := earliestWindow(attacks)
+	for _, repo := range inv.Repos {
+		if pr, err := ioc.Persistence(repo.Path, ioc.RepoTargets, attacks, ioc.Options{Window: window}); err == nil {
+			sweep.Merge(pr)
+		}
+	}
+
+	// $HOME is outside the tree the user asked about. Reading it is what finds
+	// agent-hook persistence, but a run that goes there has to say so.
+	if *homeOn {
+		if home, err := os.UserHomeDir(); err == nil {
+			hr, hErr := ioc.Persistence(home, ioc.HomeTargets, attacks, ioc.Options{Window: window})
+			if hErr == nil {
+				rep.AddGap("persistence: %d location(s) in $HOME were inspected — outside the scanned tree, disable with -home=false", hr.PersistenceChecked)
+				for _, f := range hr.Findings {
+					rep.HomeFindings = append(rep.HomeFindings, f.Describe(home))
+				}
+				sweep.PersistenceChecked += hr.PersistenceChecked
+				sweep.PersistenceUntouched += hr.PersistenceUntouched
+			}
+		}
+	} else {
+		rep.AddGap("persistence targets in $HOME were NOT inspected (-home=false); agent hooks and shell profiles are where the 2026 attacks persisted")
+	}
+	if sweep.PersistenceChecked > 0 {
+		rep.AddGap("persistence: %d known location(s) inspected, %d untouched since the window start",
+			sweep.PersistenceChecked, sweep.PersistenceUntouched)
+	}
 	rep.AddGap("layer 3 (workflow static analysis, delegated to zizmor) is not implemented")
 	rep.AddGap("layer 4 (CI runs inside the attack window) is not implemented")
 	rep.AddGap("OSV.dev was not queried; only local attack files and corpus were matched")
@@ -148,10 +175,16 @@ func cmdScan(args []string) int {
 		visible := deps.MatchIgnoringVersions(all, attacks, c)
 		familySeen += len(visible)
 
-		if len(v.MaliciousDeps) > 0 || len(v.Artifacts) > 0 {
+		switch {
+		case len(v.MaliciousDeps) > 0 || hasIndicator(sweep, repo.Path):
 			v.Status = verdict.Confirmed
 			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s)", len(all), checked)
-		} else {
+		case len(v.Artifacts) > 0:
+			// Persistence with no known indicator: a location moved inside the
+			// window. Real enough to name, not enough to call confirmed.
+			v.Status = verdict.Suspected
+			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s); no malicious version, but a persistence location moved inside the window", len(all), checked)
+		default:
 			v.Status = verdict.Clean
 			v.Reason = fmt.Sprintf("%d packages from %d lockfile(s), no known-malicious version", len(all), checked)
 			if len(visible) > 0 {
@@ -210,21 +243,23 @@ func artifactsUnder(sweep *ioc.Result, repoPath string) []string {
 		if !strings.HasPrefix(f.Path, prefix) {
 			continue
 		}
-		rel, err := filepath.Rel(repoPath, f.Path)
-		if err != nil {
-			rel = f.Path
-		}
-		when := "mtime outside the window"
-		if f.InWindow {
-			when = "MODIFIED INSIDE THE WINDOW"
-		}
-		line := ""
-		if f.Line > 0 {
-			line = fmt.Sprintf(":%d", f.Line)
-		}
-		out = append(out, fmt.Sprintf("%s%s — %s %q via %s, %s", rel, line, f.Kind, f.Artifact, f.Attack, when))
+		out = append(out, f.Describe(repoPath))
 	}
 	return out
+}
+
+// hasIndicator reports whether any finding under repoPath carries a known
+// indicator, as opposed to only having moved inside the window. That is the
+// line between confirmed and suspected: a hook edited last week is ordinary,
+// a hook containing the C2 domain is not.
+func hasIndicator(sweep *ioc.Result, repoPath string) bool {
+	prefix := repoPath + string(os.PathSeparator)
+	for _, f := range sweep.Findings {
+		if f.Artifact != "" && strings.HasPrefix(f.Path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func describeFinding(f deps.Finding) string {

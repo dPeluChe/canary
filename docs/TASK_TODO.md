@@ -83,14 +83,14 @@ failure modes. `zizmor` stays the one exception, because it contributes
 - [x] Opt back into `node_modules` for this layer only. ~33k files/s with
       bounded concurrency; a very large tree is still minutes, and `-sweep=false`
       is the escape for a dependency-only pass
-- [ ] Persistence targets, developer machine: Claude Code settings + hooks,
-      VS Code `tasks.json`, shell profiles, git hooks (global and per repo)
-- [ ] Persistence targets, **deploy surface** — files committed in the repo that
-      ship to users, which a postinstall payload can write: service worker
-      (survives a clean redeploy, in the visitor's browser), served HTML,
-      `_headers` / `netlify.toml` / `vercel.json` CSP weakening,
-      `.well-known/assetlinks.json`, `.well-known/security.txt`.
-      Surfaced while evaluating web-check — see RESEARCH/TOOLING_LANDSCAPE.md
+- [x] Persistence targets, developer machine: Claude Code settings + hooks,
+      VS Code `tasks.json`, shell profiles, git hooks (global and per repo).
+      Direct stat, no tree walk; `*.sample` git hooks excluded
+- [x] Persistence targets, **deploy surface** — service worker, served HTML,
+      `_headers` / `netlify.toml` / `vercel.json`, `.well-known/`. Surfaced
+      while evaluating web-check — see RESEARCH/TOOLING_LANDSCAPE.md
+- [ ] Layer 2 remaining: hash artifacts, and `$HOME` targets beyond the current
+      list (LaunchAgents, cron, systemd user units)
 - [x] Check content **and** mtime against the window; reported separately, and
       no window given means nothing is claimed to be inside one
 

@@ -29,36 +29,23 @@ import (
 	"github.com/dPeluChe/canary/internal/attack"
 )
 
-// PersistenceTarget is a location malware is known to write to in order to
-// survive a reboot or re-execute on a developer's next action.
-//
-// Each is checked for two things: known-bad content, and modification inside
-// the forensic window. An untouched file with an old mtime is a strong
-// negative; content alone is not.
-var PersistenceTargets = []string{
-	"~/.claude/settings.json",
-	"~/.claude/hooks/",
-	"<repo>/.claude/settings.json",
-	"<repo>/.claude/settings.local.json",
-	"<repo>/.vscode/tasks.json",
-	"~/.config/git/hooks/",
-	"<repo>/.git/hooks/",
-	"~/.zshrc",
-	"~/.bashrc",
-	"~/.profile",
-}
-
-// Finding is one artifact match on disk.
+// Finding is one artifact match on disk, or one persistence location that
+// carries an indicator or moved inside the window.
 type Finding struct {
-	Path       string
-	Attack     string
-	Artifact   string
-	Kind       string
-	Line       int
-	Excerpt    string
-	ModTime    time.Time
-	InWindow   bool // modified at or after the attack window start
-	Persistent bool // matched a PersistenceTarget rather than ordinary source
+	Path     string
+	Attack   string
+	Artifact string
+	Kind     string
+	Line     int
+	Excerpt  string
+	ModTime  time.Time
+	InWindow bool // modified at or after the attack window start
+
+	// Set for persistence findings only.
+	Persistent bool
+	Target     string // the target pattern that matched
+	Family     string // FamilyDeveloper or FamilyDeploy
+	Note       string // why this location is worth inspecting
 }
 
 // Result is one sweep, including what it could not read. The skip counters are
@@ -71,6 +58,43 @@ type Result struct {
 	SkippedLarge      int // over MaxFileSize, contents never searched
 	SkippedBinary     int // NUL byte near the start, not text
 	SkippedUnreadable int // permissions, races, vanished files
+
+	PersistenceChecked   int // known locations that exist and were inspected
+	PersistenceUntouched int // inspected, old mtime, no indicator — a strong negative
+}
+
+// Merge folds another result into r, so a run can combine the artifact sweep
+// with per-repo and home persistence checks.
+//
+// The same file can be reached by both — a service worker is walked by the
+// sweep and inspected as a deploy target — so identical hits are merged rather
+// than listed twice. The persistence copy wins: it carries the family and the
+// note explaining why that location matters.
+func (r *Result) Merge(other *Result) {
+	if other == nil {
+		return
+	}
+	seen := map[findingKey]int{}
+	for i, f := range r.Findings {
+		seen[keyOf(f)] = i
+	}
+	for _, f := range other.Findings {
+		if at, dup := seen[keyOf(f)]; dup {
+			if f.Persistent && !r.Findings[at].Persistent {
+				r.Findings[at] = f
+			}
+			continue
+		}
+		seen[keyOf(f)] = len(r.Findings)
+		r.Findings = append(r.Findings, f)
+	}
+	r.FilesScanned += other.FilesScanned
+	r.FilesRead += other.FilesRead
+	r.SkippedLarge += other.SkippedLarge
+	r.SkippedBinary += other.SkippedBinary
+	r.SkippedUnreadable += other.SkippedUnreadable
+	r.PersistenceChecked += other.PersistenceChecked
+	r.PersistenceUntouched += other.PersistenceUntouched
 }
 
 // Gaps renders the skip counters as sentences for verdict.Report.Gaps. It
@@ -100,6 +124,15 @@ const defaultMaxFileSize = 2 << 20 // 2 MiB
 type ref struct {
 	attackID string
 	art      attack.Artifact
+}
+
+type findingKey struct {
+	path, artifact string
+	line           int
+}
+
+func keyOf(f Finding) findingKey {
+	return findingKey{f.Path, f.Artifact, f.Line}
 }
 
 // Sweep walks root looking for the artifacts of the given attacks.
