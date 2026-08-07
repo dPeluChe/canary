@@ -6,8 +6,10 @@ You have a folder with 80 repos in it. A registry gets compromised at 09:00 UTC.
 Which of your projects is affected, which CI runner installed the bad version,
 and did anything persist? `canary` answers that in one pass.
 
-> **Status: early scaffold.** `discover` and the attack data layer work. The
-> four scanning layers are designed and stubbed. See
+> **Status: layer 1 works end to end.** `canary scan` inventories a tree,
+> resolves every lockfile transitively and crosses the result against known
+> attacks, with a verdict per repo. Layers 2, 3 and 4 are designed, stubbed,
+> and printed as explicit gaps in every report. See
 > [docs/TASK_TODO.md](docs/TASK_TODO.md).
 
 ```
@@ -17,7 +19,7 @@ canary attacks keyv-2026-08       # one attack in full
 canary import -csv keyv.csv -id keyv-2026-08 \
   -name 'keyv npm compromise' -started 2026-08-04T09:00:00Z \
   > attacks/keyv-2026-08.json     # vendor CSV → attack file, on stdout
-canary scan ~/code --since 2026-08-04T09:00:00Z
+canary scan ~/code                # verdict per repo, gaps included
 ```
 
 **No command is longer than two words.** `canary attacks` already means "show

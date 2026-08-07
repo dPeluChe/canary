@@ -27,15 +27,16 @@ Ordered so each step is provable before the next depends on it.
 
 ## Next — Layer 1, deps
 
-- [ ] Match resolved packages against loaded attacks (offline path)
+- [x] Match resolved packages against loaded attacks and corpus (offline path),
+      with provenance per finding and an index so it is not quadratic
 - [ ] Populate `Resolved.Direct` — scalibr reports dep *groups*, not whether the
       manifest declared it. Reporting only, never filtering
 - [ ] Extractors for the non-npm lockfile kinds discover already finds
       (Cargo.lock, go.sum, requirements.txt, poetry.lock, Gemfile.lock, …)
 - [ ] Query OSV.dev for `MAL-` + CVE (online path), batched
-- [ ] **Self-validation mode**: re-run the match ignoring versions, to prove the
-      extractor can see a package family at all. A negative from an unvalidated
-      parser is worthless — see JOURNAL/2608.md
+- [x] **Self-validation mode**: `deps.MatchIgnoringVersions`, wired into `scan`.
+      A run that never saw a single package from any attack family says so as a
+      gap, because that negative is unproven
 
 ## attacks as the multi-source centre
 
@@ -90,11 +91,11 @@ failure modes. `zizmor` stays the one exception, because it contributes
 
 ## verdict
 
-- [ ] Merge layers into per-repo status
-- [ ] Text renderer honoring the output contract (clean = one line)
-- [ ] JSON renderer
+- [x] Merge layer 1 into per-repo status; layers 2-4 land as explicit gaps
+- [x] Text renderer honoring the output contract (clean = one line)
+- [x] JSON renderer
 - [ ] SARIF renderer
-- [ ] Exit codes wired
+- [x] Exit codes wired (0 clean / 1 findings / 2 canary failed)
 - [ ] **Persist the resolved inventory** to `.canary/inventory.json`, not just
       the verdict. Re-resolving 485 lockfiles to test one new attack is
       wasted work — and `watch` mode below depends on this artifact existing
