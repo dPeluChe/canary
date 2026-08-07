@@ -3,6 +3,7 @@ package corpus
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dPeluChe/canary/internal/attack"
@@ -179,5 +180,31 @@ func TestZeroValueCorpusIsSafe(t *testing.T) {
 	}
 	if c.Count("") != 0 {
 		t.Error("zero-value corpus must count zero")
+	}
+}
+
+func TestResolveDir(t *testing.T) {
+	// Explicit flag wins over everything and is NOT checked for existence.
+	dir, src, err := ResolveDir("/nonexistent/explicit", "/tmp")
+	if err != nil || dir != "/nonexistent/explicit" || src != SourceFlag {
+		t.Fatalf("explicit: dir=%q src=%q err=%v", dir, src, err)
+	}
+
+	// Env var beats repo-local and default.
+	t.Setenv(EnvDir, "/from/env")
+	dir, src, err = ResolveDir("", "/tmp")
+	if err != nil || dir != "/from/env" || src != SourceEnv {
+		t.Fatalf("env: dir=%q src=%q err=%v", dir, src, err)
+	}
+	os.Unsetenv(EnvDir)
+
+	// Repo-local corpus/ beats default when it exists.
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, "corpus"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir, src, err = ResolveDir("", workdir)
+	if err != nil || src != SourceRepo || !strings.HasSuffix(dir, "/corpus") {
+		t.Fatalf("repo-local: dir=%q src=%q err=%v", dir, src, err)
 	}
 }

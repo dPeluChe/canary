@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/dPeluChe/canary/internal/attack"
+	"github.com/dPeluChe/canary/internal/datadir"
 )
 
 // Entry is one malicious package from one or more corpus sources.
@@ -116,6 +117,28 @@ func (c *Corpus) Ecosystems() []string {
 // Sources returns the source labels this corpus was built from.
 func (c *Corpus) Sources() []string {
 	return append([]string(nil), c.sources...)
+}
+
+// Sources a corpus directory can come from, in precedence order. Mirrors
+// attack.ResolveDir so `canary attacks -corpus` resolves its directory the
+// same way `canary attacks` does — an inconsistency here would mean the same
+// flag means different things depending on whether -corpus is set.
+const (
+	SourceFlag    = datadir.SourceFlag
+	SourceEnv     = "$" + EnvDir
+	SourceRepo    = datadir.SourceRepo + " corpus/"
+	SourceDefault = datadir.SourceDefault
+)
+
+// EnvDir is the environment variable scripts/fetch-attack.sh writes into.
+const EnvDir = "CANARY_CORPUS_DIR"
+
+// ResolveDir picks which directory to load a corpus from, and reports which
+// source chose it. Same contract as attack.ResolveDir — they share
+// datadir.Resolve so a flag cannot behave differently depending on which data
+// it points at.
+func ResolveDir(explicit, workdir string) (dir, source string, err error) {
+	return datadir.Resolve(explicit, workdir, EnvDir, "corpus")
 }
 
 // LoadDataDog reads every samples/<subdir>/manifest.json under dir (a cloned

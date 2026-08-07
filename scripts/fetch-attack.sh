@@ -74,7 +74,7 @@ datadog)
 	cat <<EOF
 
 DataDog ships samples/<ecosystem>/manifest.json (Apache-2.0). It is a cumulative
-corpus, not an incident: load it with `canary corpus $target` (internal/corpus),
+corpus, not an incident: load it with `canary attacks -corpus` (internal/corpus),
 do NOT convert it to an attack file — it has no single forensic window.
 EOF
 	;;
@@ -83,7 +83,7 @@ pypi-mal)
 
 pypi_malregistry is a PyPI corpus with NO upstream license: use it locally,
 never commit or redistribute it. Same corpus shape as DataDog — load with
-`canary corpus $target`, not `canary import`.
+`canary attacks -corpus`, not `canary import`.
 EOF
 	;;
 esac
