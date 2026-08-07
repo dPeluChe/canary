@@ -1,4 +1,4 @@
-// Package ioc sweeps the filesystem for campaign artifacts and for the
+// Package ioc sweeps the filesystem for attack artifacts and for the
 // persistence mechanisms modern supply-chain malware installs.
 //
 // LAYER 2 of 4. See docs/ARCHITECTURE/OVERVIEW.md.
@@ -37,14 +37,14 @@ var PersistenceTargets = []string{
 // Finding is one artifact match on disk.
 type Finding struct {
 	Path       string
-	Campaign   string
+	Attack     string
 	Artifact   string
 	Line       int
 	Excerpt    string
 	Persistent bool // matched a PersistenceTarget rather than ordinary source
 }
 
-// Sweep scans root for the artifacts of the given campaigns.
-func Sweep(root string, campaigns []string) ([]Finding, error) {
+// Sweep scans root for the artifacts of the given attacks.
+func Sweep(root string, attacks []string) ([]Finding, error) {
 	panic("not implemented")
 }

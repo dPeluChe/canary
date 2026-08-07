@@ -4,7 +4,7 @@
 *.out
 
 # Fetched IoC lists: upstream licensing is unstated, never commit them.
-/campaigns/*/
-!/campaigns/README.md
+/attacks/*/
+!/attacks/README.md
 
 .DS_Store

@@ -105,7 +105,7 @@ func cmdDiscover(args []string) int {
 func cmdScan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	since := fs.String("since", "", "forensic window start, RFC3339 (e.g. 2026-08-04T09:00:00Z)")
-	offline := fs.Bool("offline", false, "no network: local campaigns only")
+	offline := fs.Bool("offline", false, "no network: local attack files only")
 	format := fs.String("format", "text", "output format: text|json|sarif")
 	if err := fs.Parse(args); err != nil {
 		return exitError

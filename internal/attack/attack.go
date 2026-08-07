@@ -1,20 +1,21 @@
-// Package campaign loads attack campaigns from data files.
+// Package attack loads known supply-chain attacks from data files.
 //
-// A campaign is DATA, never compiled-in code. This is the central design
-// decision of canary: when a supply-chain attack breaks, the vendor IoC list
-// (Wiz, Socket, Aikido, StepSecurity) is public within hours, while the OSV
-// MAL- advisory can take days. Tools that hardcode their package list into
-// source need a release per incident. canary loads a file and runs.
+// An attack here is the ATTACKER's, not a scan of ours: one registry
+// compromise, described as data. It is never compiled in. When an attack
+// breaks, the vendor IoC list (Wiz, Socket, Aikido, StepSecurity) is public
+// within hours, while the OSV MAL- advisory can take days. Tools that hardcode
+// their package list into source need a release per incident. canary loads a
+// file and runs.
 //
-// The trap this layer guards against is a campaign that looks loaded but is
+// The trap this layer guards against is an attack that looks loaded but is
 // not. A misspelled key, a file that failed to parse, an empty directory —
 // each one silently shrinks the set canary matches against, and the scan still
 // reports clean. Load therefore fails loudly instead of returning a partial
-// set: an unreadable campaign is a hole in coverage, not one bad path in a
+// set: an unreadable attack file is a hole in coverage, not one bad path in a
 // tree walk.
 //
 // On-disk format: docs/ARCHITECTURE/DATA_MODEL.md.
-package campaign
+package attack
 
 import (
 	"encoding/json"
@@ -32,10 +33,10 @@ import (
 // guessing at fields it does not understand.
 const Schema = 1
 
-// ErrNoCampaigns means the directory was readable but held no campaign file.
-// Callers must surface this as a coverage gap — a scan with zero campaigns
+// ErrNoAttacks means the directory was readable but held no attack file.
+// Callers must surface this as a coverage gap — a scan with zero attacks
 // loaded reports clean for exactly the same reason a scan that never ran does.
-var ErrNoCampaigns = errors.New("no campaign files found")
+var ErrNoAttacks = errors.New("no attack files found")
 
 // Artifact kinds. Anything else is rejected at load time.
 const (
@@ -54,8 +55,8 @@ var artifactKinds = map[string]bool{
 	KindUserAgent: true,
 }
 
-// Campaign is one supply-chain incident and everything known to identify it.
-type Campaign struct {
+// Attack is one supply-chain incident and everything known to identify it.
+type Attack struct {
 	Schema    int        `json:"schema"`
 	ID        string     `json:"id"`      // e.g. "keyv-2026-08"
 	Name      string     `json:"name"`    // human label
@@ -65,7 +66,7 @@ type Campaign struct {
 	Packages  []Package  `json:"packages,omitempty"`
 	Artifacts []Artifact `json:"artifacts,omitempty"`
 
-	File string `json:"-"` // path this campaign was loaded from
+	File string `json:"-"` // path this attack was loaded from
 }
 
 // Package is a package name plus the versions known to be malicious.
@@ -92,19 +93,19 @@ type Artifact struct {
 	Note      string `json:"note,omitempty"`
 }
 
-// Load reads every *.json campaign in dir, non-recursively. Subdirectories are
-// skipped: scripts/fetch-campaign.sh clones whole upstream repos underneath.
+// Load reads every *.json attack file in dir, non-recursively. Subdirectories are
+// skipped: scripts/fetch-attack.sh clones whole upstream repos underneath.
 //
 // It returns an error rather than a partial set if any file fails to load, and
-// ErrNoCampaigns if none were found. A missing dir wraps fs.ErrNotExist so the
+// ErrNoAttacks if none were found. A missing dir wraps fs.ErrNotExist so the
 // caller can turn it into a gap instead of an abort.
-func Load(dir string) ([]Campaign, error) {
+func Load(dir string) ([]Attack, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("campaign: %w", err)
+		return nil, fmt.Errorf("attack: %w", err)
 	}
 
-	var out []Campaign
+	var out []Attack
 	seen := map[string]string{}
 
 	for _, e := range entries {
@@ -117,26 +118,26 @@ func Load(dir string) ([]Campaign, error) {
 			return nil, err
 		}
 		if prev, dup := seen[c.ID]; dup {
-			return nil, fmt.Errorf("campaign: duplicate id %q in %s and %s", c.ID, prev, path)
+			return nil, fmt.Errorf("attack: duplicate id %q in %s and %s", c.ID, prev, path)
 		}
 		seen[c.ID] = path
 		out = append(out, c)
 	}
 
 	if len(out) == 0 {
-		return nil, fmt.Errorf("campaign: %s: %w", dir, ErrNoCampaigns)
+		return nil, fmt.Errorf("attack: %s: %w", dir, ErrNoAttacks)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-func loadFile(path string) (Campaign, error) {
-	var c Campaign
+func loadFile(path string) (Attack, error) {
+	var c Attack
 
 	f, err := os.Open(path)
 	if err != nil {
-		return c, fmt.Errorf("campaign: %w", err)
+		return c, fmt.Errorf("attack: %w", err)
 	}
 	defer f.Close()
 
@@ -145,20 +146,20 @@ func loadFile(path string) (Campaign, error) {
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(&c); err != nil {
-		return c, fmt.Errorf("campaign: %s: %w", path, err)
+		return c, fmt.Errorf("attack: %s: %w", path, err)
 	}
 	if dec.More() {
-		return c, fmt.Errorf("campaign: %s: trailing data after the campaign object", path)
+		return c, fmt.Errorf("attack: %s: trailing data after the attack object", path)
 	}
 
 	c.File = path
 	if err := c.validate(); err != nil {
-		return c, fmt.Errorf("campaign: %s: %w", path, err)
+		return c, fmt.Errorf("attack: %s: %w", path, err)
 	}
 	return c, nil
 }
 
-func (c *Campaign) validate() error {
+func (c *Attack) validate() error {
 	if c.Schema != Schema {
 		return fmt.Errorf("schema %d is not supported, want %d", c.Schema, Schema)
 	}
@@ -172,7 +173,7 @@ func (c *Campaign) validate() error {
 		return errors.New("started is required: layers 2 and 4 have no forensic window without it")
 	}
 	if len(c.Packages) == 0 && len(c.Artifacts) == 0 {
-		return errors.New("campaign declares neither packages nor artifacts and can never match")
+		return errors.New("attack declares neither packages nor artifacts and can never match")
 	}
 
 	for i, p := range c.Packages {

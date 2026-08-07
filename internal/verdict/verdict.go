@@ -37,10 +37,10 @@ type Repo struct {
 
 // Report is a whole run.
 type Report struct {
-	Root      string
-	Campaigns []string
-	Repos     []Repo
-	Gaps      []string // what this run could NOT establish
+	Root    string
+	Attacks []string
+	Repos   []Repo
+	Gaps    []string // what this run could NOT establish
 }
 
 // Render writes the report in format: "text", "json" or "sarif".

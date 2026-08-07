@@ -5,17 +5,17 @@
 # unstated (the Wiz IoC repo publishes no LICENSE). Pull them locally instead.
 set -euo pipefail
 
-DEST="${CANARY_CAMPAIGN_DIR:-$HOME/.canary/campaigns}"
+DEST="${CANARY_ATTACK_DIR:-$HOME/.canary/attacks}"
 
 usage() {
 	cat >&2 <<'EOF'
-usage: fetch-campaign.sh <source>
+usage: fetch-attack.sh <source>
 
 sources:
   wiz     github.com/wiz-sec-public/wiz-research-iocs  (per-incident CSVs)
   ossf    github.com/ossf/malicious-packages           (OSV format, canonical)
 
-destination: $CANARY_CAMPAIGN_DIR, default ~/.canary/campaigns
+destination: $CANARY_ATTACK_DIR, default ~/.canary/attacks
 EOF
 	exit 2
 }

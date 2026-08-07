@@ -1,11 +1,11 @@
 # Data model
 
-## Campaign
+## Attack
 
-A campaign is one supply-chain incident, expressed as data.
+A attack is one supply-chain incident, expressed as data.
 
 ```
-Campaign
+Attack
   ID        "keyv-2026-08"
   Name      human label
   Started   attack window start, UTC
@@ -27,7 +27,7 @@ Artifact
 
 ### On-disk format: JSON
 
-One campaign per `*.json` file, in a directory. `campaign.Load(dir)` reads that
+One attack per `*.json` file, in a directory. `attack.Load(dir)` reads that
 directory non-recursively.
 
 ```json
@@ -63,38 +63,38 @@ directory non-recursively.
    dependency table in CLAUDE.md deliberately does not list one.
 2. The canonical upstream feed (OpenSSF `malicious-packages`) is OSV format,
    which is JSON. The converter's input and its output share a decoder.
-3. Campaign files are generated, not typed. The list that mattered during the
+3. Attack files are generated, not typed. The list that mattered during the
    originating incident was 443 packages out of a CSV; YAML's authoring
    ergonomics buy little at that size.
 4. canary's own dependency surface is part of its argument. A supply-chain
    forensics tool carries fewer third-party parsers than it comfortably could.
 
 JSON's real cost is the lack of comments, which is why `note` is a schema field
-on the campaign and on every artifact. The *why* of an indicator travels as
+on the attack and on every artifact. The *why* of an indicator travels as
 data, and survives into the report.
 
 ### Field rules, and what each one prevents
 
 | Field | Rule | Failure it prevents |
 |---|---|---|
-| `schema` | must equal `1` | a future format decoding as a half-empty campaign |
+| `schema` | must equal `1` | a future format decoding as a half-empty attack |
 | `id`, `name` | required | unattributable findings |
 | `started` | required, RFC3339 | layers 2 and 4 have no window without it |
-| `packages` / `artifacts` | at least one non-empty | a campaign that can never match |
+| `packages` / `artifacts` | at least one non-empty | an attack that can never match |
 | `versions` | **omitted or empty means every version matches** | a wholly malicious package (typosquat, hijacked publish) has no safe version |
 | `pathScope` | **required when `kind` is `filename`** | the `Math_Symbol.js` false positive, below |
 | unknown keys | rejected | `"package"` for `"packages"` decoding to zero packages and reporting clean |
 
 Loading is all-or-nothing. One malformed file fails the whole call rather than
-returning the others, and an empty directory returns `ErrNoCampaigns` instead
-of an empty slice. Four campaigns loaded out of five, or zero loaded silently,
+returning the others, and an empty directory returns `ErrNoAttacks` instead
+of an empty slice. Four attacks loaded out of five, or zero loaded silently,
 both read downstream as full coverage — see invariant 5.
 
 `pathScope` globs use `**` and are matched against paths relative to the scan
 root. Note that stdlib `filepath.Match` does **not** implement `**`; the ioc
 layer needs a matcher that does. Load only smoke-tests the pattern's syntax.
 
-### Why campaigns are files
+### Why attacks are files
 
 When an attack breaks, the vendor IoC list (Wiz, Socket, Aikido, StepSecurity)
 is public within hours. The OSV `MAL-` advisory can take days. A tool that
@@ -121,7 +121,7 @@ A bare filename artifact is a false-positive generator. Set `PathScope`.
 | Source | Strength | Weakness |
 |---|---|---|
 | OSV `MAL-` | authoritative, curated, cross-ecosystem | lags the incident by days |
-| Local campaign | available in hours | manual, incomplete, goes stale |
+| Local attack | available in hours | manual, incomplete, goes stale |
 
 Neither alone is sufficient. Both are queried and results merged.
 
@@ -158,7 +158,7 @@ Repo
   SecretsAtRisk  secret count reachable from those runs
 
 Report
-  Root, Campaigns
+  Root, Attacks
   Repos []Repo
   Gaps  []string   ← what this run could NOT establish
 ```

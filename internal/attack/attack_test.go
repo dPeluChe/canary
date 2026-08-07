@@ -1,4 +1,4 @@
-package campaign
+package attack
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const keyvCampaign = `{
+const keyvAttack = `{
   "schema": 1,
   "id": "keyv-2026-08",
   "name": "keyv / cacheable npm compromise",
@@ -26,24 +26,24 @@ const keyvCampaign = `{
   ]
 }`
 
-func writeCampaign(t *testing.T, dir, name, body string) {
+func writeAttack(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestLoadReadsCampaigns(t *testing.T) {
+func TestLoadReadsAttacks(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "keyv.json", keyvCampaign)
-	writeCampaign(t, dir, "aaa.json", strings.Replace(keyvCampaign, `"keyv-2026-08"`, `"axios-2025-11"`, 1))
+	writeAttack(t, dir, "keyv.json", keyvAttack)
+	writeAttack(t, dir, "aaa.json", strings.Replace(keyvAttack, `"keyv-2026-08"`, `"axios-2025-11"`, 1))
 
 	got, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("want 2 campaigns, got %d", len(got))
+		t.Fatalf("want 2 attacks, got %d", len(got))
 	}
 	// Sorted by ID, not by filename, so reports are stable across filesystems.
 	if got[0].ID != "axios-2025-11" || got[1].ID != "keyv-2026-08" {
@@ -66,10 +66,10 @@ func TestLoadReadsCampaigns(t *testing.T) {
 }
 
 // A misspelled key must not decode to an empty list. Silently loading zero
-// packages produces a clean verdict for a campaign that was never applied.
+// packages produces a clean verdict for an attack that was never applied.
 func TestLoadRejectsUnknownField(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "typo.json", strings.Replace(keyvCampaign, `"packages"`, `"package"`, 1))
+	writeAttack(t, dir, "typo.json", strings.Replace(keyvAttack, `"packages"`, `"package"`, 1))
 
 	if _, err := Load(dir); err == nil {
 		t.Fatal("want error for unknown field, got nil")
@@ -80,7 +80,7 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 // This is the Math_Symbol.js case from the incident that started the project.
 func TestLoadRejectsUnscopedFilenameArtifact(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "bad.json", strings.Replace(keyvCampaign,
+	writeAttack(t, dir, "bad.json", strings.Replace(keyvAttack,
 		`"pathScope": "**/node_modules/keyv/**",`, "", 1))
 
 	_, err := Load(dir)
@@ -92,31 +92,31 @@ func TestLoadRejectsUnscopedFilenameArtifact(t *testing.T) {
 	}
 }
 
-// Invariant 5: never return a partial set. Four campaigns loaded out of five
+// Invariant 5: never return a partial set. Four attacks loaded out of five
 // reads as full coverage and is the worst possible output.
 func TestLoadFailsRatherThanReturningPartialSet(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "good.json", keyvCampaign)
-	writeCampaign(t, dir, "broken.json", `{"schema": 1, "id": "x"`)
+	writeAttack(t, dir, "good.json", keyvAttack)
+	writeAttack(t, dir, "broken.json", `{"schema": 1, "id": "x"`)
 
 	got, err := Load(dir)
 	if err == nil {
-		t.Fatalf("want error, got %d campaigns", len(got))
+		t.Fatalf("want error, got %d attacks", len(got))
 	}
 	if got != nil {
-		t.Errorf("want nil campaigns on failure, got %d", len(got))
+		t.Errorf("want nil attacks on failure, got %d", len(got))
 	}
 	if !strings.Contains(err.Error(), "broken.json") {
 		t.Errorf("error should name the failing file: %v", err)
 	}
 }
 
-// A scan that loaded no campaigns and a scan that found nothing look identical
+// A scan that loaded no attacks and a scan that found nothing look identical
 // from the outside. The caller needs to tell them apart.
 func TestLoadEmptyDirIsNotSuccess(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Load(dir); !errors.Is(err, ErrNoCampaigns) {
-		t.Fatalf("want ErrNoCampaigns, got %v", err)
+	if _, err := Load(dir); !errors.Is(err, ErrNoAttacks) {
+		t.Fatalf("want ErrNoAttacks, got %v", err)
 	}
 }
 
@@ -127,32 +127,32 @@ func TestLoadMissingDirIsDistinguishable(t *testing.T) {
 	}
 }
 
-// fetch-campaign.sh clones upstream repos into subdirectories of the campaign
+// fetch-attack.sh clones upstream repos into subdirectories of the attack
 // dir; walking into them would try to parse every JSON file they ship.
 func TestLoadSkipsSubdirsAndOtherFiles(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "keyv.json", keyvCampaign)
-	writeCampaign(t, dir, "notes.md", "not a campaign")
+	writeAttack(t, dir, "keyv.json", keyvAttack)
+	writeAttack(t, dir, "notes.md", "not a attack")
 	if err := os.MkdirAll(filepath.Join(dir, "wiz"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeCampaign(t, dir, filepath.Join("wiz", "package.json"), `{"name":"upstream"}`)
+	writeAttack(t, dir, filepath.Join("wiz", "package.json"), `{"name":"upstream"}`)
 
 	got, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("want 1 campaign, got %d", len(got))
+		t.Fatalf("want 1 attack, got %d", len(got))
 	}
 }
 
 // Two files claiming the same id means one of them silently wins wherever
-// campaigns are keyed by id.
+// attacks are keyed by id.
 func TestLoadRejectsDuplicateIDs(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "a.json", keyvCampaign)
-	writeCampaign(t, dir, "b.json", keyvCampaign)
+	writeAttack(t, dir, "a.json", keyvAttack)
+	writeAttack(t, dir, "b.json", keyvAttack)
 
 	if _, err := Load(dir); err == nil {
 		t.Fatal("want error for duplicate id, got nil")
@@ -161,8 +161,8 @@ func TestLoadRejectsDuplicateIDs(t *testing.T) {
 
 func TestLoadRequiresWindowStart(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "nowindow.json",
-		strings.Replace(keyvCampaign, `"started": "2026-08-04T09:00:00Z",`, "", 1))
+	writeAttack(t, dir, "nowindow.json",
+		strings.Replace(keyvAttack, `"started": "2026-08-04T09:00:00Z",`, "", 1))
 
 	if _, err := Load(dir); err == nil {
 		t.Fatal("want error for missing started, got nil")
@@ -171,7 +171,7 @@ func TestLoadRequiresWindowStart(t *testing.T) {
 
 func TestLoadRejectsUnknownArtifactKind(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "kind.json", strings.Replace(keyvCampaign, `"kind": "domain"`, `"kind": "dns"`, 1))
+	writeAttack(t, dir, "kind.json", strings.Replace(keyvAttack, `"kind": "domain"`, `"kind": "dns"`, 1))
 
 	if _, err := Load(dir); err == nil {
 		t.Fatal("want error for unknown artifact kind, got nil")
@@ -180,7 +180,7 @@ func TestLoadRejectsUnknownArtifactKind(t *testing.T) {
 
 func TestLoadRejectsUnsupportedSchema(t *testing.T) {
 	dir := t.TempDir()
-	writeCampaign(t, dir, "future.json", strings.Replace(keyvCampaign, `"schema": 1`, `"schema": 99`, 1))
+	writeAttack(t, dir, "future.json", strings.Replace(keyvAttack, `"schema": 1`, `"schema": 99`, 1))
 
 	if _, err := Load(dir); err == nil {
 		t.Fatal("want error for unsupported schema, got nil")

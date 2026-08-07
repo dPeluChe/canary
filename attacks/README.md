@@ -1,6 +1,6 @@
-# campaigns/
+# attacks/
 
-Attack campaigns as data. Drop a file here and `canary` matches against it —
+Attack attacks as data. Drop a file here and `canary` matches against it —
 no rebuild, no release.
 
 ## Why this directory exists
@@ -15,13 +15,13 @@ into source need a release per incident; canary reads this directory.
 IoC repository, for example, publishes no LICENSE file, which means default
 copyright applies. That is why no vendor CSV is vendored in this repo.
 
-Use `scripts/fetch-campaign.sh` to pull upstream lists into an untracked local
-directory. Only commit a campaign file here if its upstream license clearly
+Use `scripts/fetch-attack.sh` to pull upstream lists into an untracked local
+directory. Only commit an attack file here if its upstream license clearly
 permits redistribution, and record the source URL in the file.
 
 ## Format
 
-JSON, one campaign per `*.json` file. Full spec and the reasoning behind JSON
+JSON, one attack per `*.json` file. Full spec and the reasoning behind JSON
 over YAML: `docs/ARCHITECTURE/DATA_MODEL.md`.
 
 ```json
@@ -55,11 +55,11 @@ Three rules that bite:
   `Math_Symbol.js` case above, enforced rather than documented.
 - **Omitting `versions` means every version of that package matches.** Correct
   for a wholly malicious package; a loud mistake anywhere else.
-- **A file that fails to parse fails the whole load.** Campaigns are the set
+- **A file that fails to parse fails the whole load.** Attacks are the set
   canary matches against; a partial set produces a clean verdict that is a lie.
 
-Subdirectories are ignored, so `fetch-campaign.sh` can clone upstream repos
-straight into this directory without their JSON being mistaken for campaigns.
+Subdirectories are ignored, so `fetch-attack.sh` can clone upstream repos
+straight into this directory without their JSON being mistaken for attacks.
 
 ## Upstream sources
 
