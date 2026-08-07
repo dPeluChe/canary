@@ -52,6 +52,10 @@ type RepoExposure struct {
 	SecretNames []string // names only; canary never reads secret values
 	OrgSecrets  bool     // org-level secrets can be injected without appearing on the repo
 
+	// RunsTruncated is set when the run list hit the page ceiling. The window
+	// was not fully covered and the caller must say so.
+	RunsTruncated bool
+
 	// SecretsUnknown is set when the token could not list secrets. It is not
 	// the same as "no secrets": one is an unanswered question, the other is an
 	// answer, and a report that conflates them understates the risk.
@@ -66,6 +70,10 @@ var ErrNoToken = errors.New("ci: no GitHub token (set GITHUB_TOKEN or GH_TOKEN)"
 // ErrRateLimited means GitHub refused further queries. Callers must record it
 // as a coverage gap; the repos after it were not checked.
 var ErrRateLimited = errors.New("ci: GitHub rate limit reached")
+
+// maxRunPages bounds the run listing at 5,000 runs per repo. Beyond that the
+// result is marked truncated rather than quietly cut.
+const maxRunPages = 50
 
 // Client queries the GitHub API. The zero value is not usable; use New.
 type Client struct {
@@ -111,23 +119,38 @@ func (c *Client) Query(ctx context.Context, slug string, since, until time.Time)
 		created = since.UTC().Format(time.RFC3339) + ".." + until.UTC().Format(time.RFC3339)
 	}
 
-	runs, resp, err := c.gh.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo,
-		&github.ListWorkflowRunsOptions{
-			Created:     created,
-			ListOptions: github.ListOptions{PerPage: 100},
-		})
-	if err != nil {
-		return nil, classify(resp, err)
+	// Pages are followed to the end. A busy repo has more than 100 runs in a
+	// window, and stopping at the first page would truncate the very evidence
+	// this layer exists to find while the report still read as complete.
+	opts := &github.ListWorkflowRunsOptions{
+		Created:     created,
+		ListOptions: github.ListOptions{PerPage: 100},
 	}
-	for _, r := range runs.WorkflowRuns {
-		out.Runs = append(out.Runs, Run{
-			ID:         r.GetID(),
-			Workflow:   r.GetName(),
-			Event:      r.GetEvent(),
-			Branch:     r.GetHeadBranch(),
-			Conclusion: r.GetConclusion(),
-			CreatedAt:  r.GetCreatedAt().Time,
-		})
+	for page := 1; page <= maxRunPages; page++ {
+		runs, resp, err := c.gh.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
+		if err != nil {
+			return nil, classify(resp, err)
+		}
+		for _, r := range runs.WorkflowRuns {
+			out.Runs = append(out.Runs, Run{
+				ID:         r.GetID(),
+				Workflow:   r.GetName(),
+				Event:      r.GetEvent(),
+				Branch:     r.GetHeadBranch(),
+				Conclusion: r.GetConclusion(),
+				CreatedAt:  r.GetCreatedAt().Time,
+			})
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		if page == maxRunPages {
+			// A bound is necessary, but a silent one would be the same defect
+			// in a new place.
+			out.RunsTruncated = true
+			break
+		}
+		opts.Page = resp.NextPage
 	}
 
 	// Secret NAMES only. canary never reads a value, and the API does not

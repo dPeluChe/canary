@@ -198,9 +198,10 @@ func cmdScan(args []string) int {
 		visible := deps.MatchIgnoringVersions(all, attacks, c)
 		familySeen += len(visible)
 
+		// Evidence outranks the skip. Layer 1 having nothing to read must never
+		// hide a layer-2 hit: a repo with a dropped payload and no lockfile is
+		// compromised, not unchecked.
 		switch {
-		case depsSkipped:
-			v.Status = verdict.Skipped
 		case len(v.MaliciousDeps) > 0 || hasIndicator(sweep, repo.Path):
 			v.Status = verdict.Confirmed
 			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s)", len(all), checked)
@@ -209,6 +210,8 @@ func cmdScan(args []string) int {
 			// window. Real enough to name, not enough to call confirmed.
 			v.Status = verdict.Suspected
 			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s); no malicious version, but a persistence location moved inside the window", len(all), checked)
+		case depsSkipped:
+			v.Status = verdict.Skipped
 		default:
 			v.Status = verdict.Clean
 			v.Reason = fmt.Sprintf("%d packages from %d lockfile(s), no known-malicious version", len(all), checked)
@@ -237,6 +240,10 @@ func cmdScan(args []string) int {
 			checkCI(ciClient, rep, &v, repo.Slug, window, len(v.MaliciousDeps) > 0)
 		}
 		rep.Repos = append(rep.Repos, v)
+	}
+
+	if loose := looseEntry(inv, sweep, attacks, c, &familySeen, rep); loose != nil {
+		rep.Repos = append(rep.Repos, *loose)
 	}
 
 	if familySeen == 0 {
@@ -293,6 +300,67 @@ func artifactsUnder(sweep *ioc.Result, repoPath string) []string {
 	return out
 }
 
+// looseEntry covers what belongs to no repository: lockfiles discover found
+// outside any repo, and sweep hits under no repo path.
+//
+// Both were being dropped. discover reports orphans deliberately — un-repo'd
+// checkouts, unpacked tarballs, vendored app directories are exactly where an
+// incident tree has stragglers — and a malicious version there was neither
+// matched nor declared missing.
+func looseEntry(inv *discover.Result, sweep *ioc.Result, attacks []attack.Attack, c *corpus.Corpus, familySeen *int, rep *verdict.Report) *verdict.Repo {
+	v := verdict.Repo{Name: "(outside any repo)"}
+
+	for _, f := range sweep.Findings {
+		if underAnyRepo(inv, f.Path) {
+			continue
+		}
+		v.Artifacts = append(v.Artifacts, f.Describe(inv.Root))
+	}
+
+	var all []deps.Resolved
+	checked := 0
+	for _, lf := range inv.Orphans {
+		if !deps.Supported(lf.Kind) {
+			rep.AddGap("lockfile kind %q has no extractor yet — those files were not read", lf.Kind)
+			continue
+		}
+		res, err := deps.Extract(lf)
+		if err != nil {
+			rep.AddGap("%s could not be read: %v", lf.Path, err)
+			continue
+		}
+		all = append(all, res...)
+		checked++
+	}
+	for _, f := range deps.Match(all, attacks, c) {
+		v.MaliciousDeps = append(v.MaliciousDeps, describeFinding(f))
+	}
+	*familySeen += len(deps.MatchIgnoringVersions(all, attacks, c))
+
+	if len(v.MaliciousDeps) == 0 && len(v.Artifacts) == 0 && checked == 0 {
+		return nil
+	}
+	switch {
+	case len(v.MaliciousDeps) > 0:
+		v.Status = verdict.Confirmed
+	case len(v.Artifacts) > 0:
+		v.Status = verdict.Suspected
+	default:
+		v.Status = verdict.Clean
+	}
+	v.Reason = fmt.Sprintf("%d package(s) from %d orphan lockfile(s) outside any git repo", len(all), checked)
+	return &v
+}
+
+func underAnyRepo(inv *discover.Result, path string) bool {
+	for _, r := range inv.Repos {
+		if strings.HasPrefix(path, r.Path+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasIndicator reports whether any finding under repoPath carries a known
 // indicator, as opposed to only having moved inside the window. That is the
 // line between confirmed and suspected: a hook edited last week is ordinary,
@@ -333,6 +401,9 @@ func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, wi
 	v.SecretsAtRisk = len(exp.SecretNames)
 	if exp.SecretsUnknown {
 		rep.AddGap("layer 4 could not list secrets for %s; exposure there is unknown, not absent", slug)
+	}
+	if exp.RunsTruncated {
+		rep.AddGap("layer 4 hit the page ceiling for %s; runs beyond the first %d were NOT examined", slug, 50*100)
 	}
 	if len(installs) == 0 {
 		return

@@ -156,6 +156,17 @@ re-walking. That artifact is the prerequisite — see the verdict section.
   profile — something resident with access to `$HOME` is not the same kind of
   thing as a binary that runs and exits.
 
+## From the adversarial audit
+
+- [ ] **Tests for `cmd/canary`** — the orchestration has none, and three of the
+      audit's four defects lived there. Status precedence, what each status
+      prints, and the exit code contract all need pinning
+- [ ] **Verify invariant 3 per format**: `deps.Extract` claims five lockfile
+      kinds; only package-lock.json was ever proven transitively complete
+- [ ] Audit `attack`, `corpus` and `datadir` for load-time drops — a version
+      range or artifact silently lost there is the same false negative class
+- [ ] Prove invariant 1 rather than asserting it: trace syscalls on a real scan
+
 ## Later
 
 - [ ] TUI viewer (bubbletea v1), `canary view [report.json]` — two screens:

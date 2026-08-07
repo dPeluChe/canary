@@ -204,6 +204,44 @@ func TestQuerySurfacesRateLimit(t *testing.T) {
 	}
 }
 
+// A busy repo has more than one page of runs in a window. Stopping at the
+// first page would truncate the evidence this layer exists to find while the
+// report still read as complete coverage.
+func TestQueryFollowsPagination(t *testing.T) {
+	var calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", `<`+"http://"+r.Host+`/api/v3/repos/acme/app/actions/runs?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"total_count":2,"workflow_runs":[{"id":1,"created_at":"2026-08-04T10:00:00Z"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"total_count":2,"workflow_runs":[{"id":2,"created_at":"2026-08-04T11:00:00Z"}]}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := NewWithBaseURL(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := c.Query(context.Background(), "acme/app", window, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exp.Runs) != 2 {
+		t.Fatalf("both pages must be read, got %d run(s) after %d call(s)", len(exp.Runs), calls)
+	}
+	if exp.RunsTruncated {
+		t.Error("the listing ended naturally and is not truncated")
+	}
+}
+
 func TestNewWithoutATokenRefusesRatherThanGuessing(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
