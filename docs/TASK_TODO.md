@@ -96,11 +96,14 @@ failure modes. `zizmor` stays the one exception, because it contributes
 
 ## Layer 4 — ci
 
-- [ ] `go-github`: runs in window per repo
-- [ ] Parse workflow definitions for the install command
-- [ ] Secret **names** per repo; detect org-level secret injection
-- [ ] Cross-reference with layer 1 — do not report a run as a finding on its own
-- [ ] Handle rate limits and missing-token gracefully → `Skipped` + a `Gap`
+- [x] `go-github`: runs in window per repo, using the API's own created filter
+- [x] Parse workflow definitions for the install command, cached per workflow
+- [x] Secret **names** per repo (never values); org-level injection detected;
+      an unlistable secret set is recorded as unknown, not as absent
+- [x] Cross-reference with layer 1 — `RepoExposure.Material` requires an install
+      run AND reachable secrets AND a malicious version actually resolved
+- [x] Rate limits and missing token → explicit errors and printed gaps; layer 4
+      is opt-in with `-ci`, and not running it records its own gap
 
 ## verdict
 

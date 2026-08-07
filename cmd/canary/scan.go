@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
+	"github.com/dPeluChe/canary/internal/ci"
 	"github.com/dPeluChe/canary/internal/corpus"
 	"github.com/dPeluChe/canary/internal/deps"
 	"github.com/dPeluChe/canary/internal/discover"
@@ -26,6 +29,7 @@ func cmdScan(args []string) int {
 	corpusDir := fs.String("corpus", "", "corpus dataset to consult as well (default: $CANARY_CORPUS_DIR, ./corpus)")
 	format := fs.String("format", "text", "output format: text|json|sarif")
 	sweepOn := fs.Bool("sweep", true, "layer 2 artifact sweep; walks node_modules, so it costs minutes on a large tree")
+	ciOn := fs.Bool("ci", false, "layer 4: query GitHub Actions runs inside the window (needs GITHUB_TOKEN or GH_TOKEN)")
 	homeOn := fs.Bool("home", true, "also inspect persistence targets in $HOME (agent hooks, shell profiles) — outside the scanned tree")
 	if err := fs.Parse(args); err != nil {
 		return exitError
@@ -127,7 +131,17 @@ func cmdScan(args []string) int {
 			sweep.PersistenceChecked, sweep.PersistenceUntouched)
 	}
 	rep.AddGap("layer 3 (workflow static analysis, delegated to zizmor) is not implemented")
-	rep.AddGap("layer 4 (CI runs inside the attack window) is not implemented")
+	var ciClient *ci.Client
+	if *ciOn {
+		ciClient, err = ci.New("")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "canary:", err)
+			return exitError
+		}
+	} else {
+		rep.AddGap("layer 4 was not run (-ci): CI activity inside the window was NOT checked, " +
+			"and a laptop can be clean while a runner installed the same tree")
+	}
 	rep.AddGap("OSV.dev was not queried; only local attack files and corpus were matched")
 
 	familySeen := 0
@@ -190,6 +204,9 @@ func cmdScan(args []string) int {
 			if len(visible) > 0 {
 				v.Reason += fmt.Sprintf("; %d package(s) of an affected family present at safe versions", len(visible))
 			}
+		}
+		if ciClient != nil && repo.Slug != "" {
+			checkCI(ciClient, rep, &v, repo.Slug, window, len(v.MaliciousDeps) > 0)
 		}
 		rep.Repos = append(rep.Repos, v)
 	}
@@ -260,6 +277,57 @@ func hasIndicator(sweep *ioc.Result, repoPath string) bool {
 		}
 	}
 	return false
+}
+
+// checkCI folds layer 4 into a repo verdict.
+//
+// The rule this enforces is the reason the layer exists: a run inside the
+// window is NOT a finding on its own, and neither are secrets. Only all three
+// together — a run that installed dependencies, secrets reachable from it, and
+// a malicious version actually resolved — justify naming a credential. Runs
+// alone produce alarm without information.
+func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, window time.Time, maliciousResolved bool) {
+	exp, err := c.Query(context.Background(), slug, window, time.Time{})
+	if err != nil {
+		if errors.Is(err, ci.ErrRateLimited) {
+			rep.AddGap("layer 4 hit the GitHub rate limit; some repos were NOT checked for CI activity")
+		} else {
+			rep.AddGap("layer 4 could not query %s: %v", slug, err)
+		}
+		return
+	}
+	if err := c.MarkInstalls(context.Background(), slug, exp); err != nil {
+		rep.AddGap("layer 4 could not read workflow definitions for %s: %v", slug, err)
+	}
+
+	installs := exp.InstallRuns()
+	v.CIInWindow = len(installs)
+	v.SecretsAtRisk = len(exp.SecretNames)
+	if exp.SecretsUnknown {
+		rep.AddGap("layer 4 could not list secrets for %s; exposure there is unknown, not absent", slug)
+	}
+	if len(installs) == 0 {
+		return
+	}
+
+	if !exp.Material(maliciousResolved) {
+		// Recorded, deliberately not escalated. This is the documented negative
+		// the original investigation produced, and it is the common case.
+		v.Reason += fmt.Sprintf("; %d CI run(s) installed dependencies in the window, but no malicious version resolved", len(installs))
+		return
+	}
+
+	v.Status = verdict.Confirmed
+	names := exp.SecretNames
+	if exp.OrgSecrets {
+		names = append(names, "(org-level secrets injectable)")
+	}
+	if exp.SecretsUnknown {
+		names = append(names, "(secret list unavailable — exposure unknown)")
+	}
+	v.Artifacts = append(v.Artifacts, fmt.Sprintf(
+		"CI: %d run(s) installed dependencies inside the window (%s) with a malicious version resolved; reachable secrets: %s",
+		len(installs), installs[0].InstallCmd, strings.Join(names, ", ")))
 }
 
 func describeFinding(f deps.Finding) string {
