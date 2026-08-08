@@ -46,13 +46,14 @@ Decided: several sources, not one. Each entry carries **provenance** (which
 source called it malicious), and every run prints which sources it reached —
 an unreachable source is a gap, never a silence.
 
-- [ ] `canary update` — explicit refresh. Never automatic on a read command:
-      a network call as a side effect costs reproducibility, and forensics has
-      to be able to say "I scanned against exactly this list"
+- [x] `canary update` — explicit refresh, downloads to a temp file and only
+      replaces the cache after the list parses
+- [x] Source adapter: **Cobenian/shai-hulud-detect** (MIT, 5,699 name:version
+      lines → 2,364 packages after merging versions per name)
+- [x] Staleness surfaced in `canary attacks -corpus`: age per source, loud past
+      a week
 - [ ] Source adapter: **OSV.dev** `querybatch` (free, authoritative, lags days)
 - [ ] Source adapter: **OpenSSF malicious-packages** (Apache, clonable, OSV format)
-- [ ] Source adapter: **Cobenian/shai-hulud-detect** (MIT, 5,752 `name:version`,
-      actively maintained — correct TOOLING_LANDSCAPE, which implies otherwise)
 - [ ] Corpus source: **DataDog/malicious-software-packages-dataset**
       (Apache-2.0, 47k npm + 1.8k PyPI as of Aug 2026, `manifest.json` per
       ecosystem). Cumulative, not
@@ -66,7 +67,6 @@ an unreachable source is a gap, never a silence.
       fixture, not a live source.
 - [ ] Watch poller: **Safeguard threat feed** (JSON / STIX 2.1, 90-day window,
       <5 min lag). Candidate for `canary watch`, not a one-shot fetch.
-- [ ] Staleness surfaced in `canary attacks`: age per source, loud when old
 - [ ] Vendor CSVs stay manual via `canary import` — no licence to redistribute
 
 Not adapters, deliberately: Socket (service with auth, not a list) and the other

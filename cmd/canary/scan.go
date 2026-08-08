@@ -72,7 +72,7 @@ func cmdScan(args []string) int {
 	var c *corpus.Corpus
 	corpusPath, _, cErr := corpus.ResolveDir(*corpusDir, wd)
 	if cErr == nil {
-		if loaded, err := corpus.LoadDataDog(corpusPath); err == nil {
+		if loaded, err := corpus.Load(corpusPath); err == nil {
 			c = loaded
 			rep.Attacks = append(rep.Attacks, loaded.Sources()...)
 		} else if *corpusDir != "" {
