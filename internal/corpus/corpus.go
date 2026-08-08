@@ -72,6 +72,9 @@ func keyFor(ecosystem, name string) entryKey {
 	return entryKey{strings.ToLower(ecosystem), attack.NormalizeName(ecosystem, name)}
 }
 
+// DataDogSource is the provenance label carried by every entry from that list.
+const DataDogSource = "DataDog/malicious-software-packages-dataset"
+
 // datadogSubdirToOSV maps a DataDog samples/<subdir> to the OSV ecosystem
 // identifier canary uses everywhere else. Upstream is inconsistent about
 // separators (ai-skills, ide_extensions), so both spellings are accepted.
@@ -224,7 +227,7 @@ func fileExists(path string) bool {
 // which is the overwhelming majority of entries, since a typosquat has no safe
 // version.
 func LoadDataDog(dir string) (*Corpus, error) {
-	const source = "DataDog/malicious-software-packages-dataset"
+	const source = DataDogSource
 
 	samples := filepath.Join(dir, "samples")
 	entries, err := os.ReadDir(samples)
@@ -253,6 +256,24 @@ func LoadDataDog(dir string) (*Corpus, error) {
 
 	if c.Count("") == 0 {
 		return nil, fmt.Errorf("corpus: datadog: %s: no entries loaded", dir)
+	}
+	return c, nil
+}
+
+// LoadDataDogManifest reads a single samples/<eco>/manifest.json. It exists so
+// `canary update` can verify a downloaded manifest before it replaces a cached
+// one — the whole file, parsed, not just a status code.
+func LoadDataDogManifest(path, ecosystem string) (*Corpus, error) {
+	c := &Corpus{
+		entries: map[entryKey]Entry{},
+		counts:  map[string]int{},
+		sources: []string{DataDogSource},
+	}
+	if err := c.loadManifest(ecosystem, path, DataDogSource); err != nil {
+		return nil, err
+	}
+	if c.Count("") == 0 {
+		return nil, fmt.Errorf("corpus: datadog: %s: no entries", path)
 	}
 	return c, nil
 }

@@ -19,12 +19,26 @@ import (
 type source struct {
 	name    string
 	url     string
-	file    string
+	file    string // destination relative to the corpus directory
 	licence string
 	verify  func(path string) (int, error)
 }
 
 var sources = []source{
+	{
+		name:    corpus.DataDogSource + " (npm)",
+		url:     "https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/main/samples/npm/manifest.json",
+		file:    filepath.Join("samples", "npm", "manifest.json"),
+		licence: "Apache-2.0",
+		verify:  func(p string) (int, error) { return countManifest(p, "npm") },
+	},
+	{
+		name:    corpus.DataDogSource + " (PyPI)",
+		url:     "https://raw.githubusercontent.com/DataDog/malicious-software-packages-dataset/main/samples/pypi/manifest.json",
+		file:    filepath.Join("samples", "pypi", "manifest.json"),
+		licence: "Apache-2.0",
+		verify:  func(p string) (int, error) { return countManifest(p, "PyPI") },
+	},
 	{
 		name:    corpus.ShaiHuludSource,
 		url:     "https://raw.githubusercontent.com/Cobenian/shai-hulud-detect/main/compromised-packages.txt",
@@ -91,6 +105,14 @@ func cmdUpdate(args []string) int {
 	return exitClean
 }
 
+func countManifest(path, ecosystem string) (int, error) {
+	c, err := corpus.LoadDataDogManifest(path, ecosystem)
+	if err != nil {
+		return 0, err
+	}
+	return c.Count(""), nil
+}
+
 // fetchSource downloads to a temporary file, parses it, and only then replaces
 // the cached copy. A truncated download that overwrote a good list would shrink
 // the set canary matches against without saying so.
@@ -130,7 +152,11 @@ func fetchSource(s source, dir string, timeout time.Duration) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("downloaded but unusable: %w", err)
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, s.file)); err != nil {
+	dest := filepath.Join(dir, s.file)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
 		return 0, err
 	}
 	return n, nil
