@@ -29,8 +29,11 @@ Ordered so each step is provable before the next depends on it.
 
 - [x] Match resolved packages against loaded attacks and corpus (offline path),
       with provenance per finding and an index so it is not quadratic
-- [ ] Populate `Resolved.Direct` — scalibr reports dep *groups*, not whether the
-      manifest declared it. Reporting only, never filtering
+- [ ] **Decide `Resolved.Direct`'s fate.** scalibr cannot fill it, computing it
+      needs a per-format manifest parser (which CLAUDE.md forbids), and
+      DATA_MODEL forbids filtering on it. A field that cannot be filled honestly
+      and cannot be used to decide is a trap: the proposal is to delete it and
+      record why
 - [ ] Extractors for the non-npm lockfile kinds discover already finds
       (Cargo.lock, go.sum, requirements.txt, poetry.lock, Gemfile.lock, …)
 - [ ] Query OSV.dev for `MAL-` + CVE (online path), batched. This is also where
@@ -54,7 +57,7 @@ an unreachable source is a gap, never a silence.
       a week
 - [ ] Source adapter: **OSV.dev** `querybatch` (free, authoritative, lags days)
 - [ ] Source adapter: **OpenSSF malicious-packages** (Apache, clonable, OSV format)
-- [ ] Corpus source: **DataDog/malicious-software-packages-dataset**
+- [x] Corpus source: **DataDog/malicious-software-packages-dataset**
       (Apache-2.0, 47k npm + 1.8k PyPI as of Aug 2026, `manifest.json` per
       ecosystem). Cumulative, not
       an incident — loads as an offline `IsMalicious` lookup for layer 1, NOT a
@@ -170,7 +173,10 @@ re-walking. That artifact is the prerequisite — see the verdict section.
       and fixed: leading `v`, semver build metadata, registry name folding
       (npm/PyPI only), and version ranges — now refused instead of split into
       entries that match nothing
-- [ ] Prove invariant 1 rather than asserting it: trace syscalls on a real scan
+- [x] **Invariant 1 proven, not asserted**: the tree is hashed before and after
+      a scan that exercises every layer, and any create, delete, content or
+      mtime change fails the test. Chosen over a syscall trace because that
+      proves one run on one machine; this proves every future one, in CI
 
 ## Later
 
