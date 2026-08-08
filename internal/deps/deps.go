@@ -38,17 +38,17 @@ import (
 
 // Resolved is one package version present in a lockfile, direct or transitive.
 //
-// Direct is NOT populated yet: scalibr reports dependency groups (dev,
-// optional), not whether the manifest declared the package. It stays false
-// rather than guessed. Reporting may say "transitive" only once something
-// fills it — and per DATA_MODEL it must never be used to filter, which is the
-// bug this whole layer exists to avoid.
+// There is deliberately no Direct field. scalibr cannot fill it — it reports
+// dependency GROUPS (dev, optional), not manifest membership — computing it
+// would need a per-format manifest parser, which is the hand-written parsing
+// CLAUDE.md forbids, and DATA_MODEL forbids filtering on it anyway. A field
+// that cannot be filled honestly and cannot be used to decide is a trap for
+// whoever reads it next.
 type Resolved struct {
 	Ecosystem string
 	Name      string
 	Version   string
 	Lockfile  string
-	Direct    bool
 }
 
 // newExtractor maps a lockfile name to the scalibr extractor that reads it.

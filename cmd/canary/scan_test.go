@@ -210,3 +210,39 @@ func TestScanJSONCarriesStatusAndGaps(t *testing.T) {
 		t.Error("a run that skipped layers 3 and 4 must say so in JSON too")
 	}
 }
+
+// A finding inside a nested repository belongs to that repository, not to its
+// parent. discover already claims lockfiles longest-path-first; layer 2 used a
+// bare prefix match, so a real scan reported labs-canary/cmd/canary/scan_test.go
+// under the workspace root — which is itself a git repo and does not own the
+// file. Found by running the binary on a real tree, not by a test or an audit.
+func TestArtifactsBelongToTheNearestRepo(t *testing.T) {
+	tr := newTree(t)
+	outer := tr.repo(t, "outer", "", "")
+	inner := filepath.Join(outer, "nested")
+	writeFile(t, filepath.Join(inner, ".git", "config"), "[core]\n")
+	writeFile(t, filepath.Join(inner, "src", "payload.js"), `fetch("npm-cache-evil.invalid")`)
+
+	out, code := tr.run(t, "-v")
+	if code != exitFindings {
+		t.Fatalf("the payload must be found: exit=%d\n%s", code, out)
+	}
+
+	var current string
+	attributed := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "outer" || trimmed == "nested":
+			current = trimmed
+		case strings.Contains(trimmed, "payload.js") && current != "":
+			attributed[current] = trimmed
+		}
+	}
+	if _, wrong := attributed["outer"]; wrong {
+		t.Errorf("the parent repo must not claim a nested repo's finding:\n%s", out)
+	}
+	if _, right := attributed["nested"]; !right {
+		t.Errorf("the nested repo must own its own finding:\n%s", out)
+	}
+}

@@ -29,11 +29,8 @@ Ordered so each step is provable before the next depends on it.
 
 - [x] Match resolved packages against loaded attacks and corpus (offline path),
       with provenance per finding and an index so it is not quadratic
-- [ ] **Decide `Resolved.Direct`'s fate.** scalibr cannot fill it, computing it
-      needs a per-format manifest parser (which CLAUDE.md forbids), and
-      DATA_MODEL forbids filtering on it. A field that cannot be filled honestly
-      and cannot be used to decide is a trap: the proposal is to delete it and
-      record why
+- [x] `Resolved.Direct` deleted. It could not be filled honestly and could not
+      be used to decide; the reasoning lives in the struct comment
 - [ ] Extractors for the non-npm lockfile kinds discover already finds
       (Cargo.lock, go.sum, requirements.txt, poetry.lock, Gemfile.lock, …)
 - [ ] Query OSV.dev for `MAL-` + CVE (online path), batched. This is also where
@@ -186,7 +183,8 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 - [ ] Gitleaks integration for secrets
 - [ ] Ignore-file support (spark's `.sparkauditignore` model)
 - [ ] Per-repo tags to scope sweeps (own repos vs third-party clones)
-- [ ] Concurrency: fan out per repo, bound network layer separately
+- [x] Concurrency in the layer-2 walk (5.2x). The network layer still needs its
+      own bound when layer 4 runs across many repos
 - [ ] `cobra` once the command surface outgrows stdlib `flag`
 - [ ] Release: goreleaser, brew tap, binaries
 

@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -136,4 +137,71 @@ func mustRender(t *testing.T, r *Report, format string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A clean result is one line. At a handful of repos that means one each; at
+// three hundred it means one total, because a wall of identical CLEAN rows
+// buries the sections that need reading. The real run that motivated this
+// printed 180 of them.
+func TestTextCollapsesCleanAtScale(t *testing.T) {
+	r := &Report{Root: "/tree"}
+	for i := 0; i < 50; i++ {
+		r.Repos = append(r.Repos, Repo{Name: fmt.Sprintf("repo%02d", i), Status: Clean, Reason: "no known-malicious version"})
+	}
+
+	out := string(mustRender(t, r, "text"))
+	if strings.Contains(out, "repo00") {
+		t.Errorf("50 clean repos should collapse to a count:\n%s", out)
+	}
+	if !strings.Contains(out, "CLEAN — 50 repo(s)") || !strings.Contains(out, "-v to list") {
+		t.Errorf("the count and the way to expand it must both be there:\n%s", out)
+	}
+
+	r.Verbose = true
+	if !strings.Contains(string(mustRender(t, r, "text")), "repo00") {
+		t.Error("-v must restore the per-repo detail")
+	}
+}
+
+// Skipped collapses too, but never loses the REASONS: what was not checked and
+// why is the half of a report that is easiest to lose and worst to lose.
+func TestTextKeepsSkipReasonsWhenCollapsing(t *testing.T) {
+	r := &Report{Root: "/tree"}
+	for i := 0; i < 22; i++ {
+		reason := "no lockfiles"
+		if i%2 == 0 {
+			reason = "1 lockfile(s), none readable by this build"
+		}
+		r.Repos = append(r.Repos, Repo{Name: fmt.Sprintf("s%02d", i), Status: Skipped, Reason: reason})
+	}
+
+	out := string(mustRender(t, r, "text"))
+	if strings.Contains(out, "s00") {
+		t.Errorf("names collapse at scale:\n%s", out)
+	}
+	for _, reason := range []string{"no lockfiles", "none readable by this build"} {
+		if !strings.Contains(out, reason) {
+			t.Errorf("the reason %q must survive collapsing:\n%s", reason, out)
+		}
+	}
+	if !strings.Contains(out, "SKIPPED — 22 repo(s) NOT checked") {
+		t.Errorf("the count must stay explicit:\n%s", out)
+	}
+}
+
+// Findings never collapse: the whole point is that they are read.
+func TestTextNeverCollapsesFindings(t *testing.T) {
+	r := &Report{Root: "/tree"}
+	for i := 0; i < 40; i++ {
+		r.Repos = append(r.Repos, Repo{
+			Name: fmt.Sprintf("hit%02d", i), Status: Confirmed,
+			MaliciousDeps: []string{"npm/keyv@6.0.0"},
+		})
+	}
+	out := string(mustRender(t, r, "text"))
+	for _, name := range []string{"hit00", "hit39"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("every confirmed repo must be named, %s missing", name)
+		}
+	}
 }
