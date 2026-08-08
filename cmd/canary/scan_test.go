@@ -304,3 +304,25 @@ func TestInventoryIsNotWrittenIntoTheScannedTree(t *testing.T) {
 		t.Errorf("the inventory must live in canary's data dir, not the tree:\n  %v", changes)
 	}
 }
+
+// Material() is false for two reachable reasons — no malicious version
+// resolved, or nothing reachable to steal — and they are opposite findings.
+// One message covering both told a human "no malicious version resolved" about
+// a repo that had one: the report lying about what was checked.
+func TestCIReasonNamesTheActualNegative(t *testing.T) {
+	nothingMalicious := ciReason(3, false)
+	if !strings.Contains(nothingMalicious, "no malicious version resolved") {
+		t.Errorf("got %q", nothingMalicious)
+	}
+
+	nothingToSteal := ciReason(3, true)
+	if strings.Contains(nothingToSteal, "no malicious version resolved") {
+		t.Errorf("a repo WITH a malicious version must not be told it had none: %q", nothingToSteal)
+	}
+	if !strings.Contains(nothingToSteal, "no reachable secrets") {
+		t.Errorf("the real reason must be named: %q", nothingToSteal)
+	}
+	if !strings.Contains(nothingToSteal, "WITH a malicious version resolved") {
+		t.Errorf("the reader must still see that a malicious version was present: %q", nothingToSteal)
+	}
+}

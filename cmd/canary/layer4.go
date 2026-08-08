@@ -18,6 +18,19 @@ import (
 // together — a run that installed dependencies, secrets reachable from it, and
 // a malicious version actually resolved — justify naming a credential. Runs
 // alone produce alarm without information.
+// ciReason explains why CI activity inside the window was not escalated.
+//
+// Material() can be false for two reachable reasons — no malicious version
+// resolved, or nothing reachable to steal — and they are opposite findings. A
+// single message covering both told a human "no malicious version resolved"
+// about a repo that had one, which is the report lying about what was checked.
+func ciReason(installs int, maliciousResolved bool) string {
+	if !maliciousResolved {
+		return fmt.Sprintf("; %d CI run(s) installed dependencies in the window, but no malicious version resolved", installs)
+	}
+	return fmt.Sprintf("; %d CI run(s) installed dependencies in the window WITH a malicious version resolved, but no reachable secrets were found", installs)
+}
+
 func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, window time.Time, maliciousResolved bool) {
 	exp, err := c.Query(context.Background(), slug, window, time.Time{})
 	if err != nil {
@@ -47,8 +60,9 @@ func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, wi
 
 	if !exp.Material(maliciousResolved) {
 		// Recorded, deliberately not escalated. This is the documented negative
-		// the original investigation produced, and it is the common case.
-		v.Reason += fmt.Sprintf("; %d CI run(s) installed dependencies in the window, but no malicious version resolved", len(installs))
+		// the original investigation produced, and it is the common case — but
+		// it has to say WHICH negative, see ciReason.
+		v.Reason += ciReason(len(installs), maliciousResolved)
 		return
 	}
 
