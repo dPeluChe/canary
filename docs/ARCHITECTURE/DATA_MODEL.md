@@ -58,9 +58,11 @@ directory non-recursively.
 
 **Why JSON and not YAML.** Four reasons, in order of weight:
 
-1. `encoding/json` is stdlib. A YAML library is the single dependency that
-   would cost canary its "builds with zero network" property, and the planned
-   dependency table in CLAUDE.md deliberately does not list one.
+1. `encoding/json` is stdlib, and a YAML library would have been the only
+   dependency in the tree at the time. **This reason has since expired**:
+   `osv-scalibr` ended the zero-network build in layer 1. The decision stands
+   on the other three, and the expiry is left visible rather than quietly
+   rewritten — a rationale that no longer holds is worth knowing about.
 2. The canonical upstream feed (OpenSSF `malicious-packages`) is OSV format,
    which is JSON. The converter's input and its output share a decoder.
 3. Attack files are generated, not typed. The list that mattered during the
@@ -138,11 +140,53 @@ Resolved
   Name       "keyv"
   Version    "4.5.4"
   Lockfile   path it came from
-  Direct     declared in the manifest, vs transitive
 ```
 
-`Direct` is for reporting only — **never** for filtering. Filtering on it is
-precisely the bug documented in RESEARCH/SPARK_ANALYSIS.md.
+**There is deliberately no `Direct` field.** It was in the original model and
+has been removed. `osv-scalibr` cannot fill it — it reports dependency *groups*
+(dev, optional), not manifest membership — computing it would need a per-format
+manifest parser, which is the hand-written parsing CLAUDE.md forbids, and this
+document forbade filtering on it anyway. A field that cannot be filled honestly
+and cannot be used to decide is a trap for whoever reads it next.
+
+The question it was meant to answer is answered better by the numbers: a real
+lockfile resolves 288 packages where the manifest declares 26.
+
+### Comparing versions and names
+
+Two spellings of the same thing must compare equal, or a loaded attack produces
+a clean verdict:
+
+- `NormalizeVersion` strips a leading `v` and build metadata — semver says build
+  metadata is not part of precedence. A prerelease is still not its release.
+- `NormalizeName` folds **only where the registry publishes a rule**: npm
+  lowercases, PyPI normalizes per PEP 503. Go module paths stay verbatim,
+  because folding them would invent matches.
+- Version **ranges** are refused at import time. Resolving them is OSV's job,
+  and splitting `">=1.0.0, <2.0.0"` on its comma yields entries that match
+  nothing while the file looks fully loaded.
+
+Any lookup that fronts this comparison — the match index, the corpus key — must
+fold identically, or it short-circuits before the comparison it exists to
+accelerate.
+
+## Inventory
+
+The resolved set of a whole tree, persisted so a newly published attack can be
+matched without re-reading anything.
+
+```
+Inventory
+  Schema, Root, Created
+  Packages []Package     unique ecosystem/name/version, stored once
+  Repos    []Repo        name, slug, path, and INDICES into Packages
+```
+
+Packages are deduplicated because a real tree resolves the same few thousand
+across hundreds of repos: 322 repos and 33,047 unique versions fit in 2.6 MB.
+
+It lives in `$CANARY_DATA_DIR` (default `~/.canary`), keyed by a hash of the
+tree — **never inside the scanned tree**, which would breach invariant 1.
 
 ## Verdict
 
