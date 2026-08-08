@@ -69,6 +69,11 @@ type Report struct {
 	HomeFindings []string `json:"homeFindings,omitempty"`
 
 	Gaps []string `json:"gaps"` // what this run could NOT establish
+
+	// Verbose keeps the per-repo detail for statuses that otherwise collapse
+	// once a tree is large. It never changes what is found, only how much of
+	// the uninteresting half is printed.
+	Verbose bool `json:"-"`
 }
 
 // Findings reports whether anything was found, which drives the exit code.
@@ -115,6 +120,18 @@ func (r *Report) Render(format string) ([]byte, error) {
 	}
 }
 
+// cleanSummaryThreshold is where a per-repo list stops informing and starts
+// hiding. Chosen from a real run: 180 CLEAN lines is a wall nobody reads.
+const cleanSummaryThreshold = 20
+
+func countReasons(repos []Repo) map[string]int {
+	out := map[string]int{}
+	for _, r := range repos {
+		out[r.Reason]++
+	}
+	return out
+}
+
 func (r *Report) text() string {
 	var b strings.Builder
 
@@ -148,20 +165,35 @@ func (r *Report) text() string {
 		}
 	}
 
-	// A clean result is one line per repo, and it says what was checked.
+	// A clean result is one line. At a handful of repos that means one line
+	// each; at three hundred it means one line total, because a wall of
+	// identical CLEAN rows buries the sections that need reading. Verbose
+	// restores the per-repo detail.
 	if n := len(byStatus[Clean]); n > 0 {
-		fmt.Fprintf(&b, "CLEAN — %d repo(s)\n", n)
-		for _, repo := range byStatus[Clean] {
-			fmt.Fprintf(&b, "  %-40s %s\n", repo.Name, repo.Reason)
+		if n > cleanSummaryThreshold && !r.Verbose {
+			fmt.Fprintf(&b, "CLEAN — %d repo(s) checked, no known-malicious version (-v to list them)\n\n", n)
+		} else {
+			fmt.Fprintf(&b, "CLEAN — %d repo(s)\n", n)
+			for _, repo := range byStatus[Clean] {
+				fmt.Fprintf(&b, "  %-40s %s\n", repo.Name, repo.Reason)
+			}
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
-	// Skipped is a first-class status: a repo nobody checked is not a clean one.
+	// Skipped is a first-class status: a repo nobody checked is not a clean
+	// one. It collapses like CLEAN, but the REASONS are always kept — what was
+	// not checked, and why, is the half of the report that is easy to lose.
 	if n := len(byStatus[Skipped]); n > 0 {
 		fmt.Fprintf(&b, "SKIPPED — %d repo(s) NOT checked\n", n)
-		for _, repo := range byStatus[Skipped] {
-			fmt.Fprintf(&b, "  %-40s %s\n", repo.Name, repo.Reason)
+		if n > cleanSummaryThreshold && !r.Verbose {
+			for reason, count := range countReasons(byStatus[Skipped]) {
+				fmt.Fprintf(&b, "  %-40s %d repo(s)\n", reason, count)
+			}
+		} else {
+			for _, repo := range byStatus[Skipped] {
+				fmt.Fprintf(&b, "  %-40s %s\n", repo.Name, repo.Reason)
+			}
 		}
 		b.WriteString("\n")
 	}

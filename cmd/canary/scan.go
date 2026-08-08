@@ -29,6 +29,7 @@ func cmdScan(args []string) int {
 	dir := fs.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
 	corpusDir := fs.String("corpus", "", "corpus dataset to consult as well (default: $CANARY_CORPUS_DIR, ./corpus)")
 	format := fs.String("format", "text", "output format: text|json|sarif")
+	verbose := fs.Bool("v", false, "list every clean and skipped repo instead of summarising them")
 	sweepOn := fs.Bool("sweep", true, "layer 2 artifact sweep; walks node_modules, so it costs minutes on a large tree")
 	ciOn := fs.Bool("ci", false, "layer 4: query GitHub Actions runs inside the window (needs GITHUB_TOKEN or GH_TOKEN)")
 	homeOn := fs.Bool("home", true, "also inspect persistence targets in $HOME (agent hooks, shell profiles) — outside the scanned tree")
@@ -48,7 +49,7 @@ func cmdScan(args []string) int {
 		return exitError
 	}
 
-	rep := &verdict.Report{Root: inv.Root}
+	rep := &verdict.Report{Root: inv.Root, Verbose: *verbose}
 
 	attackDir, attackSrc, err := attack.ResolveDir(*dir, wd)
 	if err != nil {
@@ -129,6 +130,10 @@ func cmdScan(args []string) int {
 	} else {
 		rep.AddGap("persistence targets in $HOME were NOT inspected (-home=false); agent hooks and shell profiles are where the 2026 attacks persisted")
 	}
+	if sweep.FilesScanned > 0 {
+		rep.AddGap("artifact sweep walked %d file(s) and read %d; %d skipped as binary",
+			sweep.FilesScanned, sweep.FilesRead, sweep.SkippedBinary)
+	}
 	if sweep.PersistenceChecked > 0 {
 		rep.AddGap("persistence: %d known location(s) inspected, %d untouched since the window start",
 			sweep.PersistenceChecked, sweep.PersistenceUntouched)
@@ -157,7 +162,7 @@ func cmdScan(args []string) int {
 	familySeen := 0
 	for _, repo := range inv.Repos {
 		v := verdict.Repo{Name: repo.Name, Slug: repo.Slug}
-		v.Artifacts = artifactsUnder(sweep, repo.Path)
+		v.Artifacts = artifactsUnder(inv, sweep, repo.Path)
 
 		var all []deps.Resolved
 		checked, skipped := 0, 0
@@ -204,7 +209,7 @@ func cmdScan(args []string) int {
 		// hide a layer-2 hit: a repo with a dropped payload and no lockfile is
 		// compromised, not unchecked.
 		switch {
-		case len(v.MaliciousDeps) > 0 || hasIndicator(sweep, repo.Path):
+		case len(v.MaliciousDeps) > 0 || hasIndicator(inv, sweep, repo.Path):
 			v.Status = verdict.Confirmed
 			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s)", len(all), checked)
 		case len(v.Artifacts) > 0:
@@ -287,19 +292,37 @@ func artifactCount(attacks []attack.Attack) int {
 	return n
 }
 
-// artifactsUnder attributes sweep findings to the repo that contains them.
-// Findings outside every repo are still in the sweep result; they surface in
-// the run summary rather than being dropped.
-func artifactsUnder(sweep *ioc.Result, repoPath string) []string {
+// artifactsUnder attributes sweep findings to the repo that contains them —
+// the NEAREST one.
+//
+// A prefix match alone hands a finding inside a nested repo to its parent:
+// a real scan reported labs-canary/cmd/canary/scan_test.go under the workspace
+// root, because the workspace is itself a git repo. discover already solved
+// this for lockfiles by claiming longest-path first; layer 2 did not, and the
+// finding pointed at a repo that does not own the file.
+func artifactsUnder(inv *discover.Result, sweep *ioc.Result, repoPath string) []string {
 	var out []string
-	prefix := repoPath + string(os.PathSeparator)
 	for _, f := range sweep.Findings {
-		if !strings.HasPrefix(f.Path, prefix) {
+		if nearestRepo(inv, f.Path) != repoPath {
 			continue
 		}
 		out = append(out, f.Describe(repoPath))
 	}
 	return out
+}
+
+// nearestRepo returns the longest repo path containing p, or "" when none do.
+func nearestRepo(inv *discover.Result, p string) string {
+	best := ""
+	for _, r := range inv.Repos {
+		if !strings.HasPrefix(p, r.Path+string(os.PathSeparator)) {
+			continue
+		}
+		if len(r.Path) > len(best) {
+			best = r.Path
+		}
+	}
+	return best
 }
 
 // looseEntry covers what belongs to no repository: lockfiles discover found
@@ -355,22 +378,16 @@ func looseEntry(inv *discover.Result, sweep *ioc.Result, attacks []attack.Attack
 }
 
 func underAnyRepo(inv *discover.Result, path string) bool {
-	for _, r := range inv.Repos {
-		if strings.HasPrefix(path, r.Path+string(os.PathSeparator)) {
-			return true
-		}
-	}
-	return false
+	return nearestRepo(inv, path) != ""
 }
 
 // hasIndicator reports whether any finding under repoPath carries a known
 // indicator, as opposed to only having moved inside the window. That is the
 // line between confirmed and suspected: a hook edited last week is ordinary,
 // a hook containing the C2 domain is not.
-func hasIndicator(sweep *ioc.Result, repoPath string) bool {
-	prefix := repoPath + string(os.PathSeparator)
+func hasIndicator(inv *discover.Result, sweep *ioc.Result, repoPath string) bool {
 	for _, f := range sweep.Findings {
-		if f.Artifact != "" && strings.HasPrefix(f.Path, prefix) {
+		if f.Artifact != "" && nearestRepo(inv, f.Path) == repoPath {
 			return true
 		}
 	}
