@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +14,7 @@ import (
 	"github.com/dPeluChe/canary/internal/corpus"
 	"github.com/dPeluChe/canary/internal/deps"
 	"github.com/dPeluChe/canary/internal/discover"
+	"github.com/dPeluChe/canary/internal/inventory"
 	"github.com/dPeluChe/canary/internal/ioc"
 	"github.com/dPeluChe/canary/internal/verdict"
 	"github.com/dPeluChe/canary/internal/zizmor"
@@ -29,6 +30,8 @@ func cmdScan(args []string) int {
 	dir := fs.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
 	corpusDir := fs.String("corpus", "", "corpus dataset to consult as well (default: $CANARY_CORPUS_DIR, ./corpus)")
 	format := fs.String("format", "text", "output format: text|json|sarif")
+	reuse := fs.Bool("reuse", false, "match against the stored inventory instead of re-reading the tree")
+	noSave := fs.Bool("no-inventory", false, "do not persist the resolved inventory")
 	verbose := fs.Bool("v", false, "list every clean and skipped repo instead of summarising them")
 	sweepOn := fs.Bool("sweep", true, "layer 2 artifact sweep; walks node_modules, so it costs minutes on a large tree")
 	ciOn := fs.Bool("ci", false, "layer 4: query GitHub Actions runs inside the window (needs GITHUB_TOKEN or GH_TOKEN)")
@@ -42,6 +45,20 @@ func cmdScan(args []string) int {
 		root = fs.Arg(0)
 	}
 	wd, _ := os.Getwd()
+
+	dataDir, dataErr := inventory.DataDir()
+
+	// -reuse answers one question only: does a newly published attack touch the
+	// set we already resolved? It must therefore touch NOTHING — no walk, no
+	// sweep, no network. Walking the tree first would cost what a full scan
+	// costs and defeat the artifact entirely.
+	if *reuse {
+		if dataErr != nil {
+			fmt.Fprintln(os.Stderr, "canary:", dataErr)
+			return exitError
+		}
+		return scanFromInventory(inventory.Path(dataDir, mustAbs(root)), *dir, *corpusDir, *format, *verbose)
+	}
 
 	inv, err := discover.Walk(root)
 	if err != nil {
@@ -159,6 +176,14 @@ func cmdScan(args []string) int {
 	}
 	rep.AddGap("OSV.dev was not queried; only local attack files and corpus were matched")
 
+	// The inventory is what makes testing a newly published attack cheap: the
+	// tree changes slowly, the attack list changes daily.
+	invPath := ""
+	if dataErr == nil {
+		invPath = inventory.Path(dataDir, inv.Root)
+	}
+	builder := inventory.NewBuilder(inv.Root)
+
 	familySeen := 0
 	for _, repo := range inv.Repos {
 		v := verdict.Repo{Name: repo.Name, Slug: repo.Slug}
@@ -181,6 +206,7 @@ func cmdScan(args []string) int {
 			all = append(all, res...)
 			checked++
 		}
+		builder.Add(repo, all, checked, skipped)
 
 		// Layer 1 having nothing to read does NOT end the repo: layers 3 and 4
 		// still apply, and a repo with no lockfiles can still ship a
@@ -256,6 +282,16 @@ func cmdScan(args []string) int {
 	if familySeen == 0 {
 		rep.AddGap("self-validation found NO package from any loaded attack family anywhere in the tree, " +
 			"at any version — the extractor was never observed matching, so a clean result here is unproven")
+	}
+
+	if !*noSave && invPath != "" {
+		if err := inventory.Save(invPath, builder.Inventory()); err != nil {
+			rep.AddGap("the resolved inventory could not be saved: %v — the next run re-reads the tree", err)
+		} else {
+			rep.AddGap("resolved inventory saved to %s (%d unique package versions); "+
+				"`-reuse` matches a new attack against it without re-reading the tree",
+				invPath, len(builder.Inventory().Packages))
+		}
 	}
 
 	out, err := rep.Render(*format)
@@ -394,58 +430,12 @@ func hasIndicator(inv *discover.Result, sweep *ioc.Result, repoPath string) bool
 	return false
 }
 
-// checkCI folds layer 4 into a repo verdict.
-//
-// The rule this enforces is the reason the layer exists: a run inside the
-// window is NOT a finding on its own, and neither are secrets. Only all three
-// together — a run that installed dependencies, secrets reachable from it, and
-// a malicious version actually resolved — justify naming a credential. Runs
-// alone produce alarm without information.
-func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, window time.Time, maliciousResolved bool) {
-	exp, err := c.Query(context.Background(), slug, window, time.Time{})
+func mustAbs(p string) string {
+	abs, err := filepath.Abs(p)
 	if err != nil {
-		if errors.Is(err, ci.ErrRateLimited) {
-			rep.AddGap("layer 4 hit the GitHub rate limit; some repos were NOT checked for CI activity")
-		} else {
-			rep.AddGap("layer 4 could not query %s: %v", slug, err)
-		}
-		return
+		return p
 	}
-	if err := c.MarkInstalls(context.Background(), slug, exp); err != nil {
-		rep.AddGap("layer 4 could not read workflow definitions for %s: %v", slug, err)
-	}
-
-	installs := exp.InstallRuns()
-	v.CIInWindow = len(installs)
-	v.SecretsAtRisk = len(exp.SecretNames)
-	if exp.SecretsUnknown {
-		rep.AddGap("layer 4 could not list secrets for %s; exposure there is unknown, not absent", slug)
-	}
-	if exp.RunsTruncated {
-		rep.AddGap("layer 4 hit the page ceiling for %s; runs beyond the first %d were NOT examined", slug, 50*100)
-	}
-	if len(installs) == 0 {
-		return
-	}
-
-	if !exp.Material(maliciousResolved) {
-		// Recorded, deliberately not escalated. This is the documented negative
-		// the original investigation produced, and it is the common case.
-		v.Reason += fmt.Sprintf("; %d CI run(s) installed dependencies in the window, but no malicious version resolved", len(installs))
-		return
-	}
-
-	v.Status = verdict.Confirmed
-	names := exp.SecretNames
-	if exp.OrgSecrets {
-		names = append(names, "(org-level secrets injectable)")
-	}
-	if exp.SecretsUnknown {
-		names = append(names, "(secret list unavailable — exposure unknown)")
-	}
-	v.Artifacts = append(v.Artifacts, fmt.Sprintf(
-		"CI: %d run(s) installed dependencies inside the window (%s) with a malicious version resolved; reachable secrets: %s",
-		len(installs), installs[0].InstallCmd, strings.Join(names, ", ")))
+	return abs
 }
 
 func describeFinding(f deps.Finding) string {

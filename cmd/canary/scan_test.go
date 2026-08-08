@@ -34,6 +34,8 @@ type tree struct {
 func newTree(t *testing.T) *tree {
 	t.Helper()
 	base := t.TempDir()
+	// Never write into the developer's home during a test run.
+	t.Setenv("CANARY_DATA_DIR", filepath.Join(base, "data"))
 	tr := &tree{root: filepath.Join(base, "tree"), attacks: filepath.Join(base, "attacks")}
 	writeFile(t, filepath.Join(tr.attacks, "keyv.json"), attackFile)
 	if err := os.MkdirAll(tr.root, 0o755); err != nil {
@@ -244,5 +246,61 @@ func TestArtifactsBelongToTheNearestRepo(t *testing.T) {
 	}
 	if _, right := attributed["nested"]; !right {
 		t.Errorf("the nested repo must own its own finding:\n%s", out)
+	}
+}
+
+// -reuse answers one question — does a newly published attack touch the set we
+// already resolved — and must therefore touch nothing: no walk, no sweep, no
+// network. Walking the tree first would cost what a full scan costs and defeat
+// the artifact entirely.
+func TestScanReuseMatchesTheStoredInventoryWithoutReadingTheTree(t *testing.T) {
+	tr := newTree(t)
+	tr.repo(t, "app", "package-lock.json", lockWith("6.0.0"))
+
+	if _, code := tr.run(t); code != exitFindings {
+		t.Fatal("the first scan must build the inventory")
+	}
+
+	// Delete the tree entirely. A reuse run that still works proves it read
+	// nothing but the inventory.
+	if err := os.RemoveAll(filepath.Join(tr.root, "app")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := tr.run(t, "-reuse")
+	if code != exitFindings {
+		t.Fatalf("the stored set still contains the malicious version: exit=%d\n%s", code, out)
+	}
+	if !strings.Contains(out, "npm/keyv@6.0.0") {
+		t.Errorf("the finding must come from the inventory:\n%s", out)
+	}
+	for _, want := range []string{"was NOT re-read", "layers 2, 3 and 4 did NOT run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a fast answer must not imply a full sweep, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// Without an inventory, -reuse must refuse rather than report an empty tree.
+func TestScanReuseWithoutAnInventoryRefuses(t *testing.T) {
+	tr := newTree(t)
+	tr.repo(t, "app", "package-lock.json", lockWith("6.0.0"))
+
+	if _, code := tr.run(t, "-reuse"); code != exitError {
+		t.Fatal("no inventory is a canary failure, not a clean tree")
+	}
+}
+
+// A full scan must not write into the tree it inspects, inventory included.
+func TestInventoryIsNotWrittenIntoTheScannedTree(t *testing.T) {
+	tr := newTree(t)
+	tr.repo(t, "app", "package-lock.json", lockWith("4.5.4"))
+
+	before := take(t, tr.root)
+	if _, code := tr.run(t); code != exitClean {
+		t.Fatal("fixture should be clean")
+	}
+	if changes := diff(t, before, take(t, tr.root)); len(changes) > 0 {
+		t.Errorf("the inventory must live in canary's data dir, not the tree:\n  %v", changes)
 	}
 }
