@@ -28,6 +28,9 @@
 
 ## Layers
 
+All four layers are implemented. What each one could not establish reaches
+`Report.Gaps` and is printed; nothing is skipped silently.
+
 ### discover — **implemented**
 
 Walks a root, finds git repos (by `.git`), attributes every lockfile to its
@@ -80,6 +83,16 @@ that motivated it.
 Static analysis of workflow files goes to `zizmor` (23 rules). canary shells
 out and folds the result into the verdict rather than reimplementing it.
 
+### inventory — the resolved set, persisted
+
+A scan writes the resolved package set to canary's own data directory (**not**
+into the scanned tree — that would breach invariant 1). `canary scan -reuse`
+matches a newly published attack against it in ~0.1s where a full scan takes
+seconds to minutes, reading nothing else.
+
+It is layer 1 only and says so, and it is the artifact `watch` depends on:
+polling a feed is cheap only because the answer costs milliseconds.
+
 ### ci — layer 4
 
 Per repo with a GitHub remote, for a given window:
@@ -122,6 +135,13 @@ Part of the contract — CI and cron branch on them.
 
 ## Concurrency
 
-Not yet implemented. When it is: `discover` is sequential and cheap; `deps`,
-`ioc` and `ci` fan out per repo. `ci` is network-bound and must respect GitHub
-rate limits — bound it separately from the CPU-bound layers.
+The layer-2 walk is concurrent, and it is the one that needed it: measured on a
+43k-file subtree, walking cost 0.77s while reading every file added only 0.4s.
+The bottleneck was the traversal, not the I/O, which is not where intuition
+sends the effort. Directories go to a worker pool as they are discovered, so one
+enormous `node_modules` no longer serialises the sweep — 5.2x, and a real
+322-repo tree that previously did not finish now scans in under two minutes.
+
+`discover` stays sequential and cheap. `ci` is network-bound and still needs its
+own bound, separate from the CPU-bound layers, before layer 4 runs across
+hundreds of repos.

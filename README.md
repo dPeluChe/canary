@@ -6,21 +6,54 @@ You have a folder with 80 repos in it. A registry gets compromised at 09:00 UTC.
 Which of your projects is affected, which CI runner installed the bad version,
 and did anything persist? `canary` answers that in one pass.
 
-> **Status: layer 1 works end to end.** `canary scan` inventories a tree,
-> resolves every lockfile transitively and crosses the result against known
-> attacks, with a verdict per repo. Layers 2, 3 and 4 are designed, stubbed,
-> and printed as explicit gaps in every report. See
+> **Status: all four layers work.** A full scan of a real 322-repo tree
+> completes in under two minutes and answers the question above. What a run
+> could NOT establish is printed in every report, never dropped. Not yet
+> released as a binary — build it from source for now. See
 > [docs/TASK_TODO.md](docs/TASK_TODO.md).
 
 ```
-canary discover ~/code            # inventory: repos + lockfiles
+canary update                     # refresh the redistributable source lists
 canary attacks                    # what canary can match against, and how old it is
 canary attacks keyv-2026-08       # one attack in full
+canary attacks -corpus            # the cumulative datasets, by ecosystem
+
+canary discover ~/code            # inventory: repos + lockfiles
+canary scan ~/code                # verdict per repo, gaps included
+canary scan ~/code -reuse         # match a NEW attack against the stored set, in ~0.1s
+canary scan ~/code -ci            # add layer 4 (needs GITHUB_TOKEN)
+
 canary import -csv keyv.csv -id keyv-2026-08 \
   -name 'keyv npm compromise' -started 2026-08-04T09:00:00Z \
-  > attacks/keyv-2026-08.json     # vendor CSV → attack file, on stdout
-canary scan ~/code                # verdict per repo, gaps included
+  > attacks/keyv-2026-08.json     # a vendor CSV → an attack file, on stdout
 ```
+
+### What it looks like on a real tree
+
+```
+CONFIRMED — 1 repo(s)
+
+  app
+    npm/keyv@6.0.0 via keyv-2026-08
+    node_modules/keyv/dist/index.js:1 — domain "npm-cache.com" via keyv-2026-08, MODIFIED INSIDE THE WINDOW
+    public/sw.js — modified inside the window, no known indicator: verify by hand [deploy surface]
+
+CLEAN — 180 repo(s) checked, no known-malicious version (-v to list them)
+
+SKIPPED — 142 repo(s) NOT checked
+  no lockfiles                             97 repo(s)
+  1 lockfile(s), none readable by this build   45 repo(s)
+
+NOT ESTABLISHED BY THIS RUN
+  - layer 4 was not run (-ci): CI activity inside the window was NOT checked
+  - lockfile kind "Cargo.lock" has no extractor yet — those files were not read
+  ...
+
+Absence from the lists above is absence from those lists, not evidence of safety.
+```
+
+Exit codes are part of the contract: `0` clean, `1` findings, `2` canary itself
+failed.
 
 **No command is longer than two words.** `canary attacks` already means "show
 me the attacks", so there is no `list` or `show` to type. Anything past the

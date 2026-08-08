@@ -32,19 +32,20 @@ If you disagree with a decision, argue with the doc. Do not silently reverse it.
 
 ## Architecture
 
-Seven packages under `internal/`, one per layer plus shared data sources:
+Nine packages under `internal/`, one per layer plus shared infrastructure:
 
 | Package | Layer | Responsibility | State |
 |---|---|---|---|
 | `discover/` | — | walk a tree → repos + lockfiles | DONE, tested |
 | `attack/` | — | load IoC lists as data (JSON) | DONE, tested |
 | `corpus/` | 1 | offline malicious-package lookup from cumulative datasets (DataDog, pypi_malregistry). NOT attack files — no forensic window. Loaded via `canary attacks -corpus` | DONE, tested |
-| `deps/` | 1 | lockfiles → malicious versions | extraction DONE, matching stub |
+| `deps/` | 1 | lockfiles → resolved set → malicious versions | DONE, tested |
 | `ioc/` | 2 | filesystem artifacts + persistence, two families | DONE, tested |
 | `ci/` | 4 | GitHub Actions × attack window, opt-in with `-ci` | DONE, tested |
 | `zizmor/` | 3 | delegation to the zizmor binary; gap when absent | DONE, tested |
 | `verdict/` | — | merge → per-repo answer → text/json | text+json DONE, sarif pending |
 | `datadir/` | — | where a data set is read from, shared by every source so a flag cannot mean two things | DONE, tested |
+| `inventory/` | — | the resolved set, persisted outside the tree; `scan -reuse` matches a new attack against it | DONE, tested |
 | `tui/` | — | optional viewer over a finished report | stub |
 
 Layer 3 (static analysis of workflow files) is **delegated to `zizmor`**, not
@@ -63,7 +64,9 @@ one because it seems convenient.
 2. **Attacks are data files**, never compiled-in constants.
 3. **Transitive completeness.** Any dependency check that only reads declared
    dependencies is wrong. This is the specific bug that made the reference
-   project useless for this job.
+   project useless for this job. Proven for all five supported lockfile kinds:
+   301 resolved against 8 declared, and the test goes red if extraction is
+   replaced with the manifest-based model.
 4. **Artifacts carry a path scope.** A bare filename indicator produces false
    positives — see `attack.Artifact.PathScope` and the `Math_Symbol.js` case
    documented there.
@@ -92,19 +95,31 @@ Go 1.24. Standard toolchain, no framework beyond what is listed below.
 - Tolerate unreadable paths during a walk — skip and continue. A forensic sweep
   that aborts on one permission error is useless on a real machine.
 
-### Planned dependencies
+### Dependencies
 
-Add these when the layer that needs them is implemented, not before:
+In use:
 
 | Package | Layer | Why |
 |---|---|---|
 | `github.com/google/osv-scalibr` | deps | Google's SCA library. Handles transitives and many ecosystems. **Do not hand-write lockfile parsers.** |
 | `github.com/google/go-github` | ci | Actions runs, workflow definitions, secret *names* |
+
+Still planned, add only when the layer that needs them is built:
+
+| Package | Layer | Why |
+|---|---|---|
 | `github.com/charmbracelet/bubbletea` + `bubbles` + `lipgloss` | tui | v1 stable — v2 is still RC, do not start on it |
 | `github.com/spf13/cobra` | cmd | Only once the command surface outgrows stdlib `flag` |
 
-The CLI currently uses stdlib `flag` on purpose: the scaffold builds with zero
-network access.
+The CLI uses stdlib `flag` on purpose. Note that scalibr ended the
+zero-network build — one direct dependency and 156 indirect ones — which was a
+deliberate trade recorded in the journal, not an accident. Weigh the next one
+the same way.
+
+### External binaries
+
+`zizmor` is shelled out to for layer 3 and is optional: absent, the run records
+a gap saying workflows were not audited. Never reimplement its rules.
 
 ## Testing
 

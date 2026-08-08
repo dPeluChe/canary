@@ -2,6 +2,25 @@
 
 Ordered so each step is provable before the next depends on it.
 
+**All four layers work.** A 322-repo tree scans in under two minutes, and
+`scan -reuse` matches a newly published attack against the stored inventory in
+~0.1s. What remains is breadth and reach, not correctness — with one exception:
+nothing has been released, so nobody outside this repo can run it. That is the
+next item, and it matters more than it looks. The bug that mattered most in this
+project's history was found by running the binary on a real tree, not by an
+audit.
+
+Priority now:
+
+1. **Release** — goreleaser, a tap, binaries. A tool nobody can install has no
+   users, and no users means no feedback that an audit cannot produce.
+2. **OSV.dev adapter** — the authoritative source. Today every match is against
+   third-party lists.
+3. **Non-npm extractors** — `discover` finds Cargo, Go, PyPI, RubyGems and
+   Composer lockfiles that layer 1 declines to read, and says so in a gap every
+   run. The gap is honest; the coverage is still missing.
+4. Everything else below.
+
 ## Done
 
 - [x] `internal/discover` — tree walk, repo attribution, orphan lockfiles, tests
@@ -177,6 +196,8 @@ re-walking. That artifact is the prerequisite — see the verdict section.
 
 ## Later
 
+- [ ] Bound the layer-4 network fan-out separately from the CPU-bound layers,
+      before `-ci` runs across hundreds of repos
 - [ ] TUI viewer (bubbletea v1), `canary view [report.json]` — two screens:
       finished reports, and an attack-catalogue browser (446 packages is an
       unreadable terminal dump). Viewer only: it never drives a scan

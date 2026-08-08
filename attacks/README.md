@@ -61,6 +61,17 @@ Three rules that bite:
 Subdirectories are ignored, so `fetch-attack.sh` can clone upstream repos
 straight into this directory without their JSON being mistaken for attacks.
 
+## Two ways in
+
+**`canary update`** fetches the lists whose licence permits caching — DataDog
+(Apache-2.0) and shai-hulud-detect (MIT) — into the corpus directory. Those are
+*corpora*: cumulative, spanning years, no single forensic window. They feed
+layer 1's offline lookup, not this directory.
+
+**`canary import`** converts a vendor incident CSV into an attack file, on
+stdout. Vendor lists carry no licence, so they are never fetched automatically
+and never committed here.
+
 ## Upstream sources
 
 Incident-shaped (one file per compromise, with a window):
