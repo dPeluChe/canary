@@ -24,9 +24,8 @@ import (
 
 // cmdScan is the whole product in one command: inventory a tree, resolve every
 // lockfile transitively, and cross the result against every known attack.
-//
-// Layers 2, 3 and 4 are not implemented, so this reports layer 1 only — and
-// says so in the gaps rather than letting the output read as a full sweep.
+// All four layers run; whatever a run could not establish reaches the gaps
+// rather than letting the output read as a full sweep.
 func cmdScan(args []string) int {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	dir := fs.String("dir", "", "attack directory (default: $CANARY_ATTACK_DIR, ./attacks, ~/.canary/attacks)")
