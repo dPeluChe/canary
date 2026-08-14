@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Status is the per-repo conclusion.
@@ -74,6 +75,10 @@ type Report struct {
 	// once a tree is large. It never changes what is found, only how much of
 	// the uninteresting half is printed.
 	Verbose bool `json:"-"`
+
+	// gapsMu guards AddGap: the per-repo loop runs concurrently and a gap is
+	// appended from several workers at once.
+	gapsMu sync.Mutex
 }
 
 // Findings reports whether anything was found, which drives the exit code.
@@ -95,9 +100,12 @@ func (r *Report) Findings() bool {
 }
 
 // AddGap records something this run could not establish. Duplicates are
-// dropped so a per-repo gap does not print once per repo.
+// dropped so a per-repo gap does not print once per repo. Safe for concurrent
+// use: the per-repo scan loop appends gaps from several workers.
 func (r *Report) AddGap(format string, args ...any) {
 	g := fmt.Sprintf(format, args...)
+	r.gapsMu.Lock()
+	defer r.gapsMu.Unlock()
 	for _, existing := range r.Gaps {
 		if existing == g {
 			return
@@ -187,8 +195,16 @@ func (r *Report) text() string {
 	if n := len(byStatus[Skipped]); n > 0 {
 		fmt.Fprintf(&b, "SKIPPED — %d repo(s) NOT checked\n", n)
 		if n > cleanSummaryThreshold && !r.Verbose {
-			for reason, count := range countReasons(byStatus[Skipped]) {
-				fmt.Fprintf(&b, "  %-40s %d repo(s)\n", reason, count)
+			// Sorted: a report whose unordered half changes between runs of the
+			// same scan reads as if something differed.
+			reasons := countReasons(byStatus[Skipped])
+			keys := make([]string, 0, len(reasons))
+			for reason := range reasons {
+				keys = append(keys, reason)
+			}
+			sort.Strings(keys)
+			for _, reason := range keys {
+				fmt.Fprintf(&b, "  %-40s %d repo(s)\n", reason, reasons[reason])
 			}
 		} else {
 			for _, repo := range byStatus[Skipped] {

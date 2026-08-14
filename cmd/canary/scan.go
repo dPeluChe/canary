@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dPeluChe/canary/internal/attack"
@@ -45,6 +47,13 @@ func cmdScan(args []string) int {
 		root = fs.Arg(0)
 	}
 	wd, _ := os.Getwd()
+
+	// Before any work: a scan that runs to completion and then fails to
+	// render has done its most expensive work for nothing.
+	if *format != "text" && *format != "json" && *format != "sarif" {
+		fmt.Fprintf(os.Stderr, "canary: unknown format %q (want text, json or sarif)\n", *format)
+		return exitError
+	}
 
 	dataDir, dataErr := inventory.DataDir()
 
@@ -183,103 +192,47 @@ func cmdScan(args []string) int {
 		invPath = inventory.Path(dataDir, inv.Root)
 	}
 	builder := inventory.NewBuilder(inv.Root)
+	matcher := deps.NewMatcher(attacks, c)
+	owners := ownerMap{inv: inv}
+	owners.build(sweep.Findings)
 
-	familySeen := 0
-	for _, repo := range inv.Repos {
-		v := verdict.Repo{Name: repo.Name, Slug: repo.Slug}
-		v.Artifacts = artifactsUnder(inv, sweep, repo.Path)
-
-		var all []deps.Resolved
-		checked, skipped := 0, 0
-		for _, lf := range repo.Lockfiles {
-			if !deps.Supported(lf.Kind) {
-				skipped++
-				rep.AddGap("lockfile kind %q has no extractor yet — those files were not read", lf.Kind)
-				continue
-			}
-			res, err := deps.Extract(lf)
-			if err != nil {
-				skipped++
-				rep.AddGap("%s could not be read: %v", lf.Rel, err)
-				continue
-			}
-			all = append(all, res...)
-			checked++
-		}
-		builder.Add(repo, all, checked, skipped)
-
-		// Layer 1 having nothing to read does NOT end the repo: layers 3 and 4
-		// still apply, and a repo with no lockfiles can still ship a
-		// dangerous workflow. Skipping here was silently dropping them.
-		depsSkipped := checked == 0
-		if depsSkipped {
-			switch {
-			case len(repo.Lockfiles) == 0:
-				v.Reason = "no lockfiles"
-			default:
-				v.Reason = fmt.Sprintf("%d lockfile(s), none readable by this build", skipped)
-			}
-		}
-
-		for _, f := range deps.Match(all, attacks, c) {
-			v.MaliciousDeps = append(v.MaliciousDeps, describeFinding(f))
-		}
-
-		// Self-validation: can the extractor see these families AT ALL? A
-		// negative from an extractor never observed matching anything is
-		// worthless — this is the manual step from JOURNAL/2608.md.
-		visible := deps.MatchIgnoringVersions(all, attacks, c)
-		familySeen += len(visible)
-
-		// Evidence outranks the skip. Layer 1 having nothing to read must never
-		// hide a layer-2 hit: a repo with a dropped payload and no lockfile is
-		// compromised, not unchecked.
-		switch {
-		case len(v.MaliciousDeps) > 0 || hasIndicator(inv, sweep, repo.Path):
-			v.Status = verdict.Confirmed
-			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s)", len(all), checked)
-		case len(v.Artifacts) > 0:
-			// Persistence with no known indicator: a location moved inside the
-			// window. Real enough to name, not enough to call confirmed.
-			v.Status = verdict.Suspected
-			v.Reason = fmt.Sprintf("%d package(s) resolved from %d lockfile(s); no malicious version, but a persistence location moved inside the window", len(all), checked)
-		case depsSkipped:
-			v.Status = verdict.Skipped
-		default:
-			v.Status = verdict.Clean
-			v.Reason = fmt.Sprintf("%d packages from %d lockfile(s), no known-malicious version", len(all), checked)
-			if len(visible) > 0 {
-				v.Reason += fmt.Sprintf("; %d package(s) of an affected family present at safe versions", len(visible))
-			}
-		}
-		if zizmorOK {
-			// zizmor answers "could this workflow be abused", not "were you
-			// attacked". That is Suspected at most: it never escalates a repo
-			// the forensic layers found clean.
-			if hits, zErr := zizmor.Run(context.Background(), repo.Path); zErr != nil {
-				rep.AddGap("layer 3 could not audit %s: %v", repo.Name, zErr)
-			} else if len(hits) > 0 {
-				for _, h := range hits {
-					v.Artifacts = append(v.Artifacts, "workflow: "+h.Describe())
-				}
-				if v.Status == verdict.Clean || v.Status == verdict.Skipped {
-					v.Status = verdict.Suspected
-					v.Reason = fmt.Sprintf("%s; %d workflow weakness(es) reported by zizmor", v.Reason, len(hits))
-				}
-			}
-		}
-
-		if ciClient != nil && repo.Slug != "" {
-			checkCI(ciClient, rep, &v, repo.Slug, window, len(v.MaliciousDeps) > 0)
-		}
-		rep.Repos = append(rep.Repos, v)
+	// Per-repo work runs concurrently: lockfile extraction and zizmor are the
+	// CPU- and process-bound halves a sequential loop left on the table. Order
+	// is preserved by writing each verdict to its slot, never by append; the
+	// shared report gaps are safe because AddGap locks, and the builder and
+	// self-validation counter sit behind scanMu.
+	rc := &repoScan{
+		matcher: matcher, owners: owners, sweep: sweep, window: window,
+		zizmorOK: zizmorOK, ciClient: ciClient, rep: rep, builder: builder,
 	}
+	repoVerdicts := make([]verdict.Repo, len(inv.Repos))
+	scanWorkers := runtime.NumCPU()
+	if scanWorkers > 8 {
+		scanWorkers = 8
+	}
+	if scanWorkers < 1 {
+		scanWorkers = 1
+	}
+	sema := make(chan struct{}, scanWorkers)
+	var wg sync.WaitGroup
 
-	if loose := looseEntry(inv, sweep, attacks, c, &familySeen, rep); loose != nil {
+	for i, repo := range inv.Repos {
+		wg.Add(1)
+		sema <- struct{}{}
+		go func(i int, repo discover.Repo) {
+			defer wg.Done()
+			defer func() { <-sema }()
+			repoVerdicts[i] = rc.verdictFor(repo)
+		}(i, repo)
+	}
+	wg.Wait()
+	rep.Repos = append(rep.Repos, repoVerdicts...)
+
+	if loose := looseEntry(owners, sweep, matcher, &rc.familySeen, rep); loose != nil {
 		rep.Repos = append(rep.Repos, *loose)
 	}
 
-	if familySeen == 0 {
+	if rc.familySeen == 0 {
 		rep.AddGap("self-validation found NO package from any loaded attack family anywhere in the tree, " +
 			"at any version — the extractor was never observed matching, so a clean result here is unproven")
 	}
@@ -326,108 +279,6 @@ func artifactCount(attacks []attack.Attack) int {
 		n += len(a.Artifacts)
 	}
 	return n
-}
-
-// artifactsUnder attributes sweep findings to the repo that contains them —
-// the NEAREST one.
-//
-// A prefix match alone hands a finding inside a nested repo to its parent:
-// a real scan reported labs-canary/cmd/canary/scan_test.go under the workspace
-// root, because the workspace is itself a git repo. discover already solved
-// this for lockfiles by claiming longest-path first; layer 2 did not, and the
-// finding pointed at a repo that does not own the file.
-func artifactsUnder(inv *discover.Result, sweep *ioc.Result, repoPath string) []string {
-	var out []string
-	for _, f := range sweep.Findings {
-		if nearestRepo(inv, f.Path) != repoPath {
-			continue
-		}
-		out = append(out, f.Describe(repoPath))
-	}
-	return out
-}
-
-// nearestRepo returns the longest repo path containing p, or "" when none do.
-func nearestRepo(inv *discover.Result, p string) string {
-	best := ""
-	for _, r := range inv.Repos {
-		if !strings.HasPrefix(p, r.Path+string(os.PathSeparator)) {
-			continue
-		}
-		if len(r.Path) > len(best) {
-			best = r.Path
-		}
-	}
-	return best
-}
-
-// looseEntry covers what belongs to no repository: lockfiles discover found
-// outside any repo, and sweep hits under no repo path.
-//
-// Both were being dropped. discover reports orphans deliberately — un-repo'd
-// checkouts, unpacked tarballs, vendored app directories are exactly where an
-// incident tree has stragglers — and a malicious version there was neither
-// matched nor declared missing.
-func looseEntry(inv *discover.Result, sweep *ioc.Result, attacks []attack.Attack, c *corpus.Corpus, familySeen *int, rep *verdict.Report) *verdict.Repo {
-	v := verdict.Repo{Name: "(outside any repo)"}
-
-	for _, f := range sweep.Findings {
-		if underAnyRepo(inv, f.Path) {
-			continue
-		}
-		v.Artifacts = append(v.Artifacts, f.Describe(inv.Root))
-	}
-
-	var all []deps.Resolved
-	checked := 0
-	for _, lf := range inv.Orphans {
-		if !deps.Supported(lf.Kind) {
-			rep.AddGap("lockfile kind %q has no extractor yet — those files were not read", lf.Kind)
-			continue
-		}
-		res, err := deps.Extract(lf)
-		if err != nil {
-			rep.AddGap("%s could not be read: %v", lf.Path, err)
-			continue
-		}
-		all = append(all, res...)
-		checked++
-	}
-	for _, f := range deps.Match(all, attacks, c) {
-		v.MaliciousDeps = append(v.MaliciousDeps, describeFinding(f))
-	}
-	*familySeen += len(deps.MatchIgnoringVersions(all, attacks, c))
-
-	if len(v.MaliciousDeps) == 0 && len(v.Artifacts) == 0 && checked == 0 {
-		return nil
-	}
-	switch {
-	case len(v.MaliciousDeps) > 0:
-		v.Status = verdict.Confirmed
-	case len(v.Artifacts) > 0:
-		v.Status = verdict.Suspected
-	default:
-		v.Status = verdict.Clean
-	}
-	v.Reason = fmt.Sprintf("%d package(s) from %d orphan lockfile(s) outside any git repo", len(all), checked)
-	return &v
-}
-
-func underAnyRepo(inv *discover.Result, path string) bool {
-	return nearestRepo(inv, path) != ""
-}
-
-// hasIndicator reports whether any finding under repoPath carries a known
-// indicator, as opposed to only having moved inside the window. That is the
-// line between confirmed and suspected: a hook edited last week is ordinary,
-// a hook containing the C2 domain is not.
-func hasIndicator(inv *discover.Result, sweep *ioc.Result, repoPath string) bool {
-	for _, f := range sweep.Findings {
-		if f.Artifact != "" && nearestRepo(inv, f.Path) == repoPath {
-			return true
-		}
-	}
-	return false
 }
 
 func mustAbs(p string) string {
