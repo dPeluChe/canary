@@ -110,18 +110,22 @@ func TestQuerySeparatesUnknownSecretsFromNone(t *testing.T) {
 
 // The distinction that makes layer 4 worth anything: a workflow that ran is
 // not the same as a workflow that resolved the dependency tree.
+//
+// The listing itself carries workflow_id and head_sha, so MarkInstalls needs
+// no per-run fetch — on a busy repo that was one API call per run spent
+// relearning what the listing already said.
 func TestMarkInstallsReadsTheWorkflowDefinition(t *testing.T) {
 	c := fakeGitHub(t, map[string]any{
 		"/api/v3/repos/acme/app/actions/runs": map[string]any{
 			"total_count": 2,
 			"workflow_runs": []map[string]any{
-				{"id": 1, "name": "build", "created_at": "2026-08-04T12:00:00Z"},
-				{"id": 2, "name": "lint", "created_at": "2026-08-04T13:00:00Z"},
+				{"id": 1, "name": "build", "created_at": "2026-08-04T12:00:00Z",
+					"workflow_id": 100, "head_sha": "abc123"},
+				{"id": 2, "name": "lint", "created_at": "2026-08-04T13:00:00Z",
+					"workflow_id": 200, "head_sha": "def456"},
 			},
 		},
 		"/api/v3/repos/acme/app/actions/secrets": map[string]any{"total_count": 0, "secrets": []map[string]any{}},
-		"/api/v3/repos/acme/app/actions/runs/1":  map[string]any{"id": 1, "workflow_id": 100},
-		"/api/v3/repos/acme/app/actions/runs/2":  map[string]any{"id": 2, "workflow_id": 200},
 		"/api/v3/repos/acme/app/actions/workflows/100": map[string]any{
 			"id": 100, "path": ".github/workflows/build.yml",
 		},
@@ -148,6 +152,95 @@ func TestMarkInstallsReadsTheWorkflowDefinition(t *testing.T) {
 	}
 	if installs[0].InstallCmd != "npm ci" {
 		t.Errorf("the observed command should be reported, got %q", installs[0].InstallCmd)
+	}
+}
+
+// The definition must be read at the SHA the run executed. Auditing the
+// branch's current tip instead would describe a workflow that never ran —
+// exactly the divergence an attacker with a poisoned PR relies on.
+func TestMarkInstallsReadsTheWorkflowAtTheRunSHA(t *testing.T) {
+	var requestedRefs []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_count":1,"workflow_runs":[{"id":7,"name":"build","created_at":"2026-08-04T12:00:00Z","workflow_id":100,"head_sha":"cafe00"}]}`))
+	})
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/secrets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_count":0,"secrets":[]}`))
+	})
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/workflows/100", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":100,"path":".github/workflows/build.yml"}`))
+	})
+	mux.HandleFunc("/api/v3/repos/acme/app/contents/.github/workflows/build.yml", func(w http.ResponseWriter, r *http.Request) {
+		requestedRefs = append(requestedRefs, r.URL.Query().Get("ref"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","name":"build.yml","path":".github/workflows/build.yml","content":"` +
+			base64.StdEncoding.EncodeToString([]byte("jobs:\n  build:\n    steps:\n      - run: npm ci\n")) + `"}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := NewWithBaseURL(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := c.Query(context.Background(), "acme/app", window, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MarkInstalls(context.Background(), "acme/app", exp); err != nil {
+		t.Fatal(err)
+	}
+	if len(requestedRefs) != 1 || requestedRefs[0] != "cafe00" {
+		t.Fatalf("the definition must be fetched at the run's head SHA, got refs %v", requestedRefs)
+	}
+	if len(exp.InstallRuns()) != 1 {
+		t.Fatalf("the workflow at that SHA installs: %+v", exp.Runs)
+	}
+}
+
+// A repo can hold more than one page of secrets. Stopping at 100 would
+// silently understate the reachable secret surface — the same defect the runs
+// listing already fixed with RunsTruncated.
+func TestQueryFollowsSecretPagination(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total_count":0,"workflow_runs":[]}`))
+	})
+	mux.HandleFunc("/api/v3/repos/acme/app/actions/secrets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", `<`+"http://"+r.Host+`/api/v3/repos/acme/app/actions/secrets?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"total_count":2,"secrets":[{"name":"NPM_TOKEN"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"total_count":2,"secrets":[{"name":"AWS_KEY"}]}`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := NewWithBaseURL(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp, err := c.Query(context.Background(), "acme/app", window, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exp.SecretNames) != 2 || exp.SecretNames[1] != "AWS_KEY" {
+		t.Fatalf("every page of secrets must be read: %v", exp.SecretNames)
+	}
+	if exp.SecretsTruncated {
+		t.Error("the listing ended naturally and is not truncated")
 	}
 }
 
@@ -276,5 +369,52 @@ func TestInstallRegexpCoversTheCommonManagers(t *testing.T) {
 	}
 	if got := strings.TrimSpace(installRE.FindString("- run: npm ci --silent")); got != "npm ci" {
 		t.Errorf("reported command: got %q", got)
+	}
+}
+
+// An install command inside a YAML comment is documentation, not execution.
+// Reporting it would mark a run as having resolved dependencies when it did
+// not — the exact alarm-without-information this layer refuses to produce.
+func TestInstallRegexpIgnoresYAMLComments(t *testing.T) {
+	commented := "# we used to run: npm install\njobs:\n  lint:\n    steps:\n      - run: echo hi\n"
+	if installRE.MatchString(stripWorkflowComments(commented)) {
+		t.Error("a commented-out install must not count as executed")
+	}
+	active := "jobs:\n  build:\n    steps:\n      - run: pnpm i # scoped comment\n"
+	if !installRE.MatchString(stripWorkflowComments(active)) {
+		t.Error("an inline shell comment after the command must not hide the command")
+	}
+}
+
+// A workflow that cannot be read at the commit the run executed leaves the run
+// with InstalledDeps false — which reads as "did not install dependencies", a
+// negative answer to a question nobody managed to ask. Pinning to the run's SHA
+// is more faithful than reading the tip and also fails more often, since a
+// force-pushed commit is collectable and a branch tip is not.
+func TestMarkInstallsCountsUnreadableWorkflows(t *testing.T) {
+	c := fakeGitHub(t, map[string]any{
+		"/api/v3/repos/acme/app/actions/runs": map[string]any{
+			"total_count": 1,
+			"workflow_runs": []map[string]any{
+				{"id": 1, "workflow_id": 100, "head_sha": "deadbeef", "created_at": "2026-08-04T12:00:00Z"},
+			},
+		},
+		"/api/v3/repos/acme/app/actions/secrets":       map[string]any{"total_count": 0, "secrets": []map[string]any{}},
+		"/api/v3/repos/acme/app/actions/workflows/100": map[string]any{"id": 100, "path": ".github/workflows/build.yml"},
+		// contents at that SHA is absent -> 404
+	})
+
+	exp, err := c.Query(context.Background(), "acme/app", window, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MarkInstalls(context.Background(), "acme/app", exp); err != nil {
+		t.Fatal(err)
+	}
+	if exp.WorkflowsUnreadable != 1 {
+		t.Fatalf("an unreadable workflow must be counted, got %d", exp.WorkflowsUnreadable)
+	}
+	if len(exp.InstallRuns()) != 0 {
+		t.Error("it must not be guessed as installing either")
 	}
 }
