@@ -24,6 +24,15 @@ import (
 // resolved, or nothing reachable to steal — and they are opposite findings. A
 // single message covering both told a human "no malicious version resolved"
 // about a repo that had one, which is the report lying about what was checked.
+// noteUnknownCIExposure records that CI exposure could not be determined.
+func noteUnknownCIExposure(rep *verdict.Report, v *verdict.Repo, slug string, exp *ci.RepoExposure, maliciousResolved bool) {
+	if exp.WorkflowsUnreadable == 0 || !maliciousResolved {
+		return
+	}
+	v.Reason += fmt.Sprintf("; a malicious version resolved and %d CI run(s) could not be read at the "+
+		"commit they executed — CI exposure is UNKNOWN, not absent", exp.WorkflowsUnreadable)
+}
+
 func ciReason(installs int, maliciousResolved bool) string {
 	if !maliciousResolved {
 		return fmt.Sprintf("; %d CI run(s) installed dependencies in the window, but no malicious version resolved", installs)
@@ -62,6 +71,14 @@ func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, wi
 	if exp.RunsTruncated {
 		rep.AddGap("layer 4 hit the page ceiling for %s; runs beyond the first %d were NOT examined", slug, 50*100)
 	}
+	// Unknown is not absent — the precedent is SecretsUnknown two lines up.
+	// When a malicious version resolved and the runs that might have installed
+	// it could not be read, the repo is already Confirmed for the dependency,
+	// but its CI exposure is an open question and the verdict has to say so.
+	// Without this the early return below leaves the repo silent about CI,
+	// which reads as "nothing was reachable from CI".
+	noteUnknownCIExposure(rep, v, slug, exp, maliciousResolved)
+
 	if len(installs) == 0 {
 		return
 	}

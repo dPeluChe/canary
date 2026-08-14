@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dPeluChe/canary/internal/ci"
+	"github.com/dPeluChe/canary/internal/verdict"
 )
 
 // These tests exist because three of the four defects an adversarial audit
@@ -324,5 +327,29 @@ func TestCIReasonNamesTheActualNegative(t *testing.T) {
 	}
 	if !strings.Contains(nothingToSteal, "WITH a malicious version resolved") {
 		t.Errorf("the reader must still see that a malicious version was present: %q", nothingToSteal)
+	}
+}
+
+// Unknown is not absent. When a malicious version resolved and the runs that
+// might have installed it could not be read, the repo verdict must say CI
+// exposure is an open question — the early return otherwise leaves it silent,
+// which reads as "nothing was reachable from CI". Same species as
+// SecretsUnknown, which this mirrors.
+func TestCIUnknownExposureIsNotSilence(t *testing.T) {
+	var v verdict.Repo
+	rep := &verdict.Report{}
+	exp := &ci.RepoExposure{WorkflowsUnreadable: 2}
+
+	noteUnknownCIExposure(rep, &v, "acme/app", exp, true)
+	if !strings.Contains(v.Reason, "UNKNOWN") {
+		t.Errorf("a malicious version plus unreadable runs must not read as no exposure: %q", v.Reason)
+	}
+
+	// Nothing malicious resolved: there is nothing CI could have installed that
+	// matters, so the verdict stays quiet rather than adding noise.
+	var quiet verdict.Repo
+	noteUnknownCIExposure(rep, &quiet, "acme/app", exp, false)
+	if quiet.Reason != "" {
+		t.Errorf("without a malicious version this must stay quiet: %q", quiet.Reason)
 	}
 }
