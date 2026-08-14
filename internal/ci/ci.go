@@ -43,6 +43,10 @@ type Run struct {
 	CreatedAt     time.Time
 	InstalledDeps bool   // the job ran npm ci / npm install / bun install / pnpm i
 	InstallCmd    string // the command observed in the workflow definition
+
+	HeadSHA string // the commit the run executed, from the run listing
+
+	WorkflowID int64 // from the run listing; the definition fetch is keyed on it
 }
 
 // RepoExposure is what a single repo had at risk during the window.
@@ -60,6 +64,11 @@ type RepoExposure struct {
 	// the same as "no secrets": one is an unanswered question, the other is an
 	// answer, and a report that conflates them understates the risk.
 	SecretsUnknown bool
+
+	// SecretsTruncated is set when the secret listing hit the page ceiling.
+	// The repo has more secrets than were listed and the caller must say so —
+	// the same contract RunsTruncated already holds for runs.
+	SecretsTruncated bool
 }
 
 // ErrNoToken means no credential was available. Layer 4 is skipped rather than
@@ -74,6 +83,10 @@ var ErrRateLimited = errors.New("ci: GitHub rate limit reached")
 // maxRunPages bounds the run listing at 5,000 runs per repo. Beyond that the
 // result is marked truncated rather than quietly cut.
 const maxRunPages = 50
+
+// maxSecretPages bounds the secret listing at 5,000 secrets per repo, with
+// the same truncation contract.
+const maxSecretPages = 50
 
 // Client queries the GitHub API. The zero value is not usable; use New.
 type Client struct {
@@ -139,6 +152,8 @@ func (c *Client) Query(ctx context.Context, slug string, since, until time.Time)
 				Branch:     r.GetHeadBranch(),
 				Conclusion: r.GetConclusion(),
 				CreatedAt:  r.GetCreatedAt().Time,
+				HeadSHA:    r.GetHeadSHA(),
+				WorkflowID: r.GetWorkflowID(),
 			})
 		}
 		if resp == nil || resp.NextPage == 0 {
@@ -154,17 +169,30 @@ func (c *Client) Query(ctx context.Context, slug string, since, until time.Time)
 	}
 
 	// Secret NAMES only. canary never reads a value, and the API does not
-	// expose one — but saying so explicitly is part of the contract.
-	secrets, resp, err := c.gh.Actions.ListRepoSecrets(ctx, owner, repo, &github.ListOptions{PerPage: 100})
-	switch {
-	case err != nil && isRateLimit(resp, err):
-		return nil, ErrRateLimited
-	case err != nil:
-		out.SecretsUnknown = true
-	default:
-		for _, s := range secrets.Secrets {
-			out.SecretNames = append(out.SecretNames, s.Name)
+	// expose one — but saying so explicitly is part of the contract. Pages are
+	// followed like runs: stopping at 100 would silently understate the
+	// reachable secret surface on a repo that has more.
+	secretsOpts := &github.ListOptions{PerPage: 100}
+	for page := 1; page <= maxSecretPages; page++ {
+		secrets, resp, err := c.gh.Actions.ListRepoSecrets(ctx, owner, repo, secretsOpts)
+		switch {
+		case err != nil && isRateLimit(resp, err):
+			return nil, ErrRateLimited
+		case err != nil:
+			out.SecretsUnknown = true
+		default:
+			for _, s := range secrets.Secrets {
+				out.SecretNames = append(out.SecretNames, s.Name)
+			}
 		}
+		if out.SecretsUnknown || resp == nil || resp.NextPage == 0 {
+			break
+		}
+		if page == maxSecretPages {
+			out.SecretsTruncated = true
+			break
+		}
+		secretsOpts.Page = resp.NextPage
 	}
 
 	orgSecrets, resp, err := c.gh.Actions.ListRepoOrgSecrets(ctx, owner, repo, &github.ListOptions{PerPage: 1})
@@ -188,39 +216,45 @@ var installRE = regexp.MustCompile(`(?m)\b(npm\s+(ci|install|i)\b|yarn\s+(instal
 //
 // This is what turns "a workflow ran" into "a workflow resolved the dependency
 // tree" — the only version of the question worth answering.
+//
+// The definition is fetched at the run's own head SHA, not the branch's
+// current tip: a run on a PR or an old default branch can have executed a
+// workflow that has since changed, and auditing today's tip would describe a
+// workflow that never ran. The listing already carries WorkflowID and
+// HeadSHA, so no per-run fetch is needed for either.
 func (c *Client) MarkInstalls(ctx context.Context, slug string, exp *RepoExposure) error {
 	owner, repo, ok := splitSlug(slug)
 	if !ok {
 		return fmt.Errorf("ci: %q is not owner/repo", slug)
 	}
 
-	cache := map[int64]struct {
+	type wfKey struct {
+		id  int64
+		sha string
+	}
+	cache := map[wfKey]struct {
 		installs bool
 		cmd      string
 	}{}
 
 	for i := range exp.Runs {
-		run, resp, err := c.gh.Actions.GetWorkflowRunByID(ctx, owner, repo, exp.Runs[i].ID)
-		if err != nil {
-			if isRateLimit(resp, err) {
-				return ErrRateLimited
-			}
-			continue
-		}
-		wfID := run.GetWorkflowID()
-		if hit, done := cache[wfID]; done {
+		run := exp.Runs[i]
+		key := wfKey{id: run.WorkflowID, sha: run.HeadSHA}
+		if hit, done := cache[key]; done {
 			exp.Runs[i].InstalledDeps, exp.Runs[i].InstallCmd = hit.installs, hit.cmd
 			continue
 		}
 
-		wf, resp, err := c.gh.Actions.GetWorkflowByID(ctx, owner, repo, wfID)
+		wf, resp, err := c.gh.Actions.GetWorkflowByID(ctx, owner, repo, key.id)
 		if err != nil {
 			if isRateLimit(resp, err) {
 				return ErrRateLimited
 			}
 			continue
 		}
-		body, _, _, err := c.gh.Repositories.GetContents(ctx, owner, repo, wf.GetPath(), nil)
+		body, _, _, err := c.gh.Repositories.GetContents(ctx, owner, repo, wf.GetPath(), &github.RepositoryContentGetOptions{
+			Ref: key.sha,
+		})
 		if err != nil || body == nil {
 			continue
 		}
@@ -229,15 +263,33 @@ func (c *Client) MarkInstalls(ctx context.Context, slug string, exp *RepoExposur
 			continue
 		}
 
-		cmd := installRE.FindString(text)
+		cmd := installRE.FindString(stripWorkflowComments(text))
 		entry := struct {
 			installs bool
 			cmd      string
 		}{installs: cmd != "", cmd: strings.TrimSpace(cmd)}
-		cache[wfID] = entry
+		cache[key] = entry
 		exp.Runs[i].InstalledDeps, exp.Runs[i].InstallCmd = entry.installs, entry.cmd
 	}
 	return nil
+}
+
+// stripWorkflowComments removes YAML comments so an install command mentioned
+// in one is not reported as executed. Only full-line comments are stripped:
+// a "#" inside a quoted run command is shell syntax, not YAML comment syntax,
+// and stripping trailing comments safely would need a YAML parser for one
+// regex's worth of precision.
+func stripWorkflowComments(text string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // InstallRuns returns only the runs that resolved dependencies. Those are the

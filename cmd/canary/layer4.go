@@ -51,6 +51,9 @@ func checkCI(c *ci.Client, rep *verdict.Report, v *verdict.Repo, slug string, wi
 	if exp.SecretsUnknown {
 		rep.AddGap("layer 4 could not list secrets for %s; exposure there is unknown, not absent", slug)
 	}
+	if exp.SecretsTruncated {
+		rep.AddGap("layer 4 hit the secret page ceiling for %s; secrets beyond the first %d were NOT listed", slug, 50*100)
+	}
 	if exp.RunsTruncated {
 		rep.AddGap("layer 4 hit the page ceiling for %s; runs beyond the first %d were NOT examined", slug, 50*100)
 	}
