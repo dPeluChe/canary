@@ -24,6 +24,20 @@ func (f Finding) String() string {
 	return f.Ecosystem + "/" + f.Name + "@" + f.Version
 }
 
+// Matcher answers "is this resolved package malicious" against a fixed set of
+// attacks and corpus. The index is built once, so a caller that matches per
+// repo — a scan — pays for it once instead of once per repo per mode.
+// A Matcher is read-only after NewMatcher and safe for concurrent use.
+type Matcher struct {
+	idx    map[indexKey][]attackRef
+	corpus *corpus.Corpus
+}
+
+// NewMatcher indexes attacks for repeated matching.
+func NewMatcher(attacks []attack.Attack, c *corpus.Corpus) *Matcher {
+	return &Matcher{idx: indexAttacks(attacks), corpus: c}
+}
+
 // Match reports which resolved packages are known malicious.
 //
 // This is the offline path: it consults the attack files and corpus already
@@ -31,7 +45,7 @@ func (f Finding) String() string {
 // not evidence of safety — the wording of anything built on this must not
 // overstate it.
 func Match(resolved []Resolved, attacks []attack.Attack, c *corpus.Corpus) []Finding {
-	return match(resolved, attacks, c, true)
+	return NewMatcher(attacks, c).Match(resolved)
 }
 
 // MatchIgnoringVersions runs the same cross with the version test removed, to
@@ -44,30 +58,42 @@ func Match(resolved []Resolved, attacks []attack.Attack, c *corpus.Corpus) []Fin
 // something. A negative from an extractor never observed matching anything is
 // worthless. See docs/JOURNAL/2608.md.
 func MatchIgnoringVersions(resolved []Resolved, attacks []attack.Attack, c *corpus.Corpus) []Finding {
-	return match(resolved, attacks, c, false)
+	return NewMatcher(attacks, c).MatchIgnoringVersions(resolved)
 }
 
-func match(resolved []Resolved, attacks []attack.Attack, c *corpus.Corpus, checkVersion bool) []Finding {
-	idx := indexAttacks(attacks)
+// Match is the reusable form of the package-level Match.
+func (m *Matcher) Match(resolved []Resolved) []Finding { return m.match(resolved, true) }
+
+// MatchIgnoringVersions is the reusable form of the package-level function.
+func (m *Matcher) MatchIgnoringVersions(resolved []Resolved) []Finding {
+	return m.match(resolved, false)
+}
+
+func (m *Matcher) match(resolved []Resolved, checkVersion bool) []Finding {
 	byPkg := map[indexKey]*Finding{}
 	var order []indexKey
 
 	for _, r := range resolved {
-		key := indexKey{strings.ToLower(r.Ecosystem), attack.NormalizeName(r.Ecosystem, r.Name), r.Version}
+		// Normalize once: the versioned key and the index lookup fold the
+		// ecosystem and name identically, so doing it twice per package is
+		// the hot loop's only waste.
+		base := indexKey{strings.ToLower(r.Ecosystem), attack.NormalizeName(r.Ecosystem, r.Name), ""}
+		key := base
+		key.version = r.Version
 		if !checkVersion {
 			key.version = ""
 		}
 
 		var hitAttacks, hitSources []string
 
-		for _, ref := range idx[indexKey{strings.ToLower(r.Ecosystem), attack.NormalizeName(r.Ecosystem, r.Name), ""}] {
+		for _, ref := range m.idx[base] {
 			if !checkVersion || ref.pkg.Matches(r.Ecosystem, r.Name, r.Version) {
 				hitAttacks = appendUnique(hitAttacks, ref.attackID)
 			}
 		}
 
-		if c != nil {
-			if entry, ok := c.Lookup(r.Ecosystem, r.Name); ok {
+		if m.corpus != nil {
+			if entry, ok := m.corpus.Lookup(r.Ecosystem, r.Name); ok {
 				if !checkVersion || entry.Matches(r.Ecosystem, r.Name, r.Version) {
 					hitSources = appendUnique(hitSources, entry.Sources...)
 				}

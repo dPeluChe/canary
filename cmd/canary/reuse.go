@@ -61,13 +61,16 @@ func scanFromInventory(invPath, attackDir, corpusDir, format string, verbose boo
 	}
 
 	familySeen := 0
+	// One index for the whole run: building it per repo per mode was hundreds
+	// of rebuilds of the same immutable data.
+	matcher := deps.NewMatcher(attacks, c)
 	for _, r := range stored.Repos {
 		v := verdict.Repo{Name: r.Name, Slug: r.Slug}
 		all := stored.Resolved(r)
-		for _, f := range deps.Match(all, attacks, c) {
+		for _, f := range matcher.Match(all) {
 			v.MaliciousDeps = append(v.MaliciousDeps, describeFinding(f))
 		}
-		familySeen += len(deps.MatchIgnoringVersions(all, attacks, c))
+		familySeen += len(matcher.MatchIgnoringVersions(all))
 
 		if len(v.MaliciousDeps) > 0 {
 			v.Status = verdict.Confirmed

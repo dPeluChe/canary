@@ -24,7 +24,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dPeluChe/canary/internal/attack"
 )
@@ -124,6 +126,27 @@ const defaultMaxFileSize = 2 << 20 // 2 MiB
 type ref struct {
 	attackID string
 	art      attack.Artifact
+	pattern  []byte // art.Value for content search, converted once
+}
+
+// refByFilename groups filename-keyed refs so the walk can look them up by
+// directory entry name instead of scanning every indicator per file — the
+// sweep visits millions of files and that scan ran under the result lock.
+type refByFilename map[string][]ref
+
+func (m refByFilename) add(r ref) {
+	m[r.art.Value] = append(m[r.art.Value], r)
+}
+
+// applicable returns the content refs whose scope covers rel, or nil.
+func contentApplicable(byContent []ref, rel string) []ref {
+	var applicable []ref
+	for _, r := range byContent {
+		if matchScope(r.art.PathScope, rel) {
+			applicable = append(applicable, r)
+		}
+	}
+	return applicable
 }
 
 type findingKey struct {
@@ -150,12 +173,14 @@ func Sweep(root string, attacks []attack.Attack, opt Options) (*Result, error) {
 		opt.MaxFileSize = defaultMaxFileSize
 	}
 
-	var byPath, byContent []ref
+	var byPath refByFilename
+	var byContent []ref
+	byPath = refByFilename{}
 	for _, a := range attacks {
 		for _, art := range a.Artifacts {
-			r := ref{attackID: a.ID, art: art}
+			r := ref{attackID: a.ID, art: art, pattern: []byte(art.Value)}
 			if art.Kind == attack.KindFilename {
-				byPath = append(byPath, r)
+				byPath.add(r)
 			} else {
 				byContent = append(byContent, r)
 			}
@@ -167,6 +192,8 @@ func Sweep(root string, attacks []attack.Attack, opt Options) (*Result, error) {
 
 	res := &Result{}
 	var mu sync.Mutex
+	var filesScanned, skippedLarge, skippedUnreadable, skippedBinary atomic.Int64
+	var filesRead atomic.Int64
 
 	// Both halves run concurrently: the walk (measured at 56k files/s
 	// single-threaded, against trees of millions) and the content reads.
@@ -188,27 +215,21 @@ func Sweep(root string, attacks []attack.Attack, opt Options) (*Result, error) {
 			defer wg.Done()
 			for j := range jobs {
 				if j.size > opt.MaxFileSize {
-					mu.Lock()
-					res.SkippedLarge++
-					mu.Unlock()
+					skippedLarge.Add(1)
 					continue
 				}
 				data, readErr := os.ReadFile(j.path)
 				if readErr != nil {
-					mu.Lock()
-					res.SkippedUnreadable++
-					mu.Unlock()
+					skippedUnreadable.Add(1)
 					continue
 				}
 				if isBinary(data) {
-					mu.Lock()
-					res.SkippedBinary++
-					mu.Unlock()
+					skippedBinary.Add(1)
 					continue
 				}
 				var found []Finding
 				for _, r := range j.applicable {
-					if line, excerpt, ok := findLine(data, r.art.Value); ok {
+					if line, excerpt, ok := findLine(data, r.pattern); ok {
 						found = append(found, Finding{
 							Path: j.path, Attack: r.attackID, Artifact: r.art.Value,
 							Kind: r.art.Kind, Line: line, Excerpt: excerpt,
@@ -216,19 +237,19 @@ func Sweep(root string, attacks []attack.Attack, opt Options) (*Result, error) {
 						})
 					}
 				}
-				mu.Lock()
-				res.FilesRead++
-				res.Findings = append(res.Findings, found...)
-				mu.Unlock()
+				filesRead.Add(1)
+				if len(found) > 0 {
+					mu.Lock()
+					res.Findings = append(res.Findings, found...)
+					mu.Unlock()
+				}
 			}
 		}()
 	}
 
 	walkConcurrent(abs, workers, func(path string, d fs.DirEntry, err error) {
 		if err != nil {
-			mu.Lock()
-			res.SkippedUnreadable++
-			mu.Unlock()
+			skippedUnreadable.Add(1)
 			return // a forensic sweep does not abort on one permission error
 		}
 
@@ -245,35 +266,43 @@ func Sweep(root string, attacks []attack.Attack, opt Options) (*Result, error) {
 			size = info.Size()
 		}
 
-		mu.Lock()
-		res.FilesScanned++
-		for _, r := range byPath {
-			if d.Name() != r.art.Value || !matchScope(r.art.PathScope, rel) {
-				continue
+		filesScanned.Add(1)
+		if refs := byPath[d.Name()]; len(refs) > 0 {
+			var found []Finding
+			for _, r := range refs {
+				if !matchScope(r.art.PathScope, rel) {
+					continue
+				}
+				found = append(found, Finding{
+					Path: path, Attack: r.attackID, Artifact: r.art.Value,
+					Kind: r.art.Kind, ModTime: mod, InWindow: inWindow(mod, opt.Window),
+				})
 			}
-			res.Findings = append(res.Findings, Finding{
-				Path: path, Attack: r.attackID, Artifact: r.art.Value,
-				Kind: r.art.Kind, ModTime: mod, InWindow: inWindow(mod, opt.Window),
-			})
+			if len(found) > 0 {
+				mu.Lock()
+				res.Findings = append(res.Findings, found...)
+				mu.Unlock()
+			}
 		}
-		mu.Unlock()
 
 		// Only queue a read if some content artifact could apply to this path.
 		// A scoped content artifact therefore costs nothing outside its scope,
 		// which is the difference between reading a few files and reading a tree.
-		var applicable []ref
-		for _, r := range byContent {
-			if matchScope(r.art.PathScope, rel) {
-				applicable = append(applicable, r)
+		if len(byContent) > 0 {
+			if applicable := contentApplicable(byContent, rel); len(applicable) > 0 {
+				jobs <- job{path: path, mod: mod, size: size, applicable: applicable}
 			}
-		}
-		if len(applicable) > 0 {
-			jobs <- job{path: path, mod: mod, size: size, applicable: applicable}
 		}
 	})
 
 	close(jobs)
 	wg.Wait()
+
+	res.FilesScanned = int(filesScanned.Load())
+	res.FilesRead = int(filesRead.Load())
+	res.SkippedLarge = int(skippedLarge.Load())
+	res.SkippedBinary = int(skippedBinary.Load())
+	res.SkippedUnreadable = int(skippedUnreadable.Load())
 
 	return res, nil
 }
@@ -301,8 +330,10 @@ func isBinary(data []byte) bool {
 // findLine returns the 1-indexed line carrying value, with a trimmed excerpt.
 // Reporting the line and its text is what lets a human confirm a hit without
 // canary having to decide whether the surrounding code is malicious.
-func findLine(data []byte, value string) (int, string, bool) {
-	idx := bytes.Index(data, []byte(value))
+// value must be the pre-converted pattern from ref.pattern: converting here
+// would allocate per artifact per file on the sweep's hot path.
+func findLine(data, value []byte) (int, string, bool) {
+	idx := bytes.Index(data, value)
 	if idx < 0 {
 		return 0, "", false
 	}
@@ -318,7 +349,17 @@ func findLine(data []byte, value string) (int, string, bool) {
 
 	excerpt := strings.TrimSpace(string(data[start:end]))
 	if len(excerpt) > 200 {
-		excerpt = excerpt[:200] + "…"
+		excerpt = truncateRunes(excerpt, 200) + "…"
 	}
 	return line, excerpt, true
+}
+
+// truncateRunes cuts s to at most limit bytes without splitting a UTF-8
+// sequence: a forensic excerpt that ends mid-rune renders as garbage.
+func truncateRunes(s string, limit int) string {
+	for len(s) > limit {
+		_, size := utf8.DecodeLastRuneInString(s)
+		s = s[:len(s)-size]
+	}
+	return s
 }

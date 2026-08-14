@@ -163,6 +163,32 @@ func TestTextCollapsesCleanAtScale(t *testing.T) {
 	}
 }
 
+// A report whose unordered half changes between identical runs reads as if
+// something differed. The collapsed SKIPPED summary iterated a map, so the
+// same scan printed its reasons in a different order every time.
+func TestTextSkippedSummaryIsDeterministic(t *testing.T) {
+	build := func() *Report {
+		r := &Report{Root: "/tree"}
+		for i := 0; i < 25; i++ {
+			reason := "no lockfiles"
+			if i%3 == 0 {
+				reason = "1 lockfile(s), none readable by this build"
+			}
+			if i%5 == 0 {
+				reason = "2 lockfile(s), none readable by this build"
+			}
+			r.Repos = append(r.Repos, Repo{Name: fmt.Sprintf("s%02d", i), Status: Skipped, Reason: reason})
+		}
+		return r
+	}
+	first := string(mustRender(t, build(), "text"))
+	for i := 0; i < 10; i++ {
+		if got := string(mustRender(t, build(), "text")); got != first {
+			t.Fatalf("the same report must render identically every time:\n%s\n---\n%s", first, got)
+		}
+	}
+}
+
 // Skipped collapses too, but never loses the REASONS: what was not checked and
 // why is the half of a report that is easiest to lose and worst to lose.
 func TestTextKeepsSkipReasonsWhenCollapsing(t *testing.T) {

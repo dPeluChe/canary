@@ -160,7 +160,7 @@ func scanIndicators(path string, size int64, indicators []ref, opt Options) []Fi
 	}
 	var out []Finding
 	for _, r := range indicators {
-		if line, excerpt, ok := findLine(data, r.art.Value); ok {
+		if line, excerpt, ok := findLine(data, r.pattern); ok {
 			out = append(out, Finding{
 				Path: path, Attack: r.attackID, Artifact: r.art.Value,
 				Kind: r.art.Kind, Line: line, Excerpt: excerpt,
