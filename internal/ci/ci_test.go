@@ -385,3 +385,36 @@ func TestInstallRegexpIgnoresYAMLComments(t *testing.T) {
 		t.Error("an inline shell comment after the command must not hide the command")
 	}
 }
+
+// A workflow that cannot be read at the commit the run executed leaves the run
+// with InstalledDeps false — which reads as "did not install dependencies", a
+// negative answer to a question nobody managed to ask. Pinning to the run's SHA
+// is more faithful than reading the tip and also fails more often, since a
+// force-pushed commit is collectable and a branch tip is not.
+func TestMarkInstallsCountsUnreadableWorkflows(t *testing.T) {
+	c := fakeGitHub(t, map[string]any{
+		"/api/v3/repos/acme/app/actions/runs": map[string]any{
+			"total_count": 1,
+			"workflow_runs": []map[string]any{
+				{"id": 1, "workflow_id": 100, "head_sha": "deadbeef", "created_at": "2026-08-04T12:00:00Z"},
+			},
+		},
+		"/api/v3/repos/acme/app/actions/secrets":       map[string]any{"total_count": 0, "secrets": []map[string]any{}},
+		"/api/v3/repos/acme/app/actions/workflows/100": map[string]any{"id": 100, "path": ".github/workflows/build.yml"},
+		// contents at that SHA is absent -> 404
+	})
+
+	exp, err := c.Query(context.Background(), "acme/app", window, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MarkInstalls(context.Background(), "acme/app", exp); err != nil {
+		t.Fatal(err)
+	}
+	if exp.WorkflowsUnreadable != 1 {
+		t.Fatalf("an unreadable workflow must be counted, got %d", exp.WorkflowsUnreadable)
+	}
+	if len(exp.InstallRuns()) != 0 {
+		t.Error("it must not be guessed as installing either")
+	}
+}

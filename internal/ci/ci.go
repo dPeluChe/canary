@@ -56,6 +56,14 @@ type RepoExposure struct {
 	SecretNames []string // names only; canary never reads secret values
 	OrgSecrets  bool     // org-level secrets can be injected without appearing on the repo
 
+	// WorkflowsUnreadable counts runs whose workflow definition could not be
+	// fetched. Those runs keep InstalledDeps false, which reads as "did not
+	// install dependencies" — a negative answer to a question nobody managed to
+	// ask. Pinning the fetch to the run's SHA is more faithful than reading the
+	// tip, and it also fails more often: a force-pushed commit is collectable,
+	// a branch tip is not. The caller must surface this as a gap.
+	WorkflowsUnreadable int
+
 	// RunsTruncated is set when the run list hit the page ceiling. The window
 	// was not fully covered and the caller must say so.
 	RunsTruncated bool
@@ -250,16 +258,19 @@ func (c *Client) MarkInstalls(ctx context.Context, slug string, exp *RepoExposur
 			if isRateLimit(resp, err) {
 				return ErrRateLimited
 			}
+			exp.WorkflowsUnreadable++
 			continue
 		}
 		body, _, _, err := c.gh.Repositories.GetContents(ctx, owner, repo, wf.GetPath(), &github.RepositoryContentGetOptions{
 			Ref: key.sha,
 		})
 		if err != nil || body == nil {
+			exp.WorkflowsUnreadable++
 			continue
 		}
 		text, err := body.GetContent()
 		if err != nil {
+			exp.WorkflowsUnreadable++
 			continue
 		}
 
